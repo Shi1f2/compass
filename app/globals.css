@@ -1,0 +1,398 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─── Palette ─────────────────────────────────────────────────────────────── */
+:root {
+  /* Surfaces */
+  --color-page:          #f7f5f1;
+  --color-surface:       #ffffff;
+  --color-sunk:          #f0ede7;
+
+  /* Text */
+  --color-ink:           #1b1b1b;
+  --color-ink-muted:     #6e6a66;
+
+  /* Lines */
+  --color-border:        #e6e1d9;
+
+  /* Primary accent — orange */
+  --color-accent:        #f0563a;
+  --color-accent-hover:  #d84726;
+  --color-accent-soft:   #fde7e1;
+
+  /* Second accent — violet */
+  --color-violet:        #b08cf7;
+  --color-violet-soft:   #efe6ff;
+
+  /* Highlight */
+  --color-yellow:        #fbc94a;
+  --color-yellow-soft:   #fef3d6;
+
+  /* Correctness */
+  --color-correct:       #2e7049;
+  --color-correct-soft:  #e5f0e8;
+  --color-incorrect:     #d0402a;
+  --color-incorrect-soft:#fbe6e1;
+
+  /* Checklist state */
+  --color-waiting:       #e2a03c;
+  --color-locked:        #b5afa6;
+
+  /* Elevation */
+  --shadow-card:   0 2px 8px  0 rgba(27, 27, 27, 0.05);
+  --shadow-lift:   0 6px 16px 0 rgba(27, 27, 27, 0.08);
+  --shadow-float:  0 16px 40px 0 rgba(27, 27, 27, 0.14);
+
+  /* Paper (print only) */
+  --color-paper:   #ffffff;
+
+  /* Typography */
+  --font-sans: 'Poppins', ui-rounded, 'Nunito Sans', system-ui, -apple-system,
+               'Segoe UI', sans-serif;
+}
+
+/* ─── Base ─────────────────────────────────────────────────────────────────── */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background-color: var(--color-page);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+input,
+textarea,
+select,
+button {
+  font: inherit;
+  color: inherit;
+}
+
+textarea {
+  resize: none;
+}
+
+::selection {
+  background-color: var(--color-yellow-soft);
+}
+
+/* ─── Thin scrollbar ───────────────────────────────────────────────────────── */
+.thin-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border) transparent;
+}
+
+.thin-scroll::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.thin-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.thin-scroll::-webkit-scrollbar-thumb {
+  background-clip: padding-box;
+  background-color: var(--color-border);
+  border: 3px solid transparent;
+  border-radius: 9999px;
+}
+
+.thin-scroll::-webkit-scrollbar-thumb:hover {
+  background-color: var(--color-locked);
+}
+
+/* ─── Shape primitives ─────────────────────────────────────────────────────── */
+@layer components {
+
+  /* Card */
+  .card {
+    @apply rounded-[20px] border border-border bg-surface shadow-card;
+  }
+
+  /* Card-as-button */
+  .card-btn {
+    @apply rounded-[20px] border border-border bg-surface shadow-card text-left
+           transition-[box-shadow,transform,background-color] duration-150;
+  }
+  .card-btn:hover {
+    @apply shadow-lift -translate-y-px;
+  }
+
+  /* Button base */
+  .btn {
+    @apply inline-flex items-center justify-center gap-2
+           rounded-full px-5 py-[10px]
+           text-xxs font-medium
+           transition-colors duration-150
+           disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  /* Primary button */
+  .btn-primary {
+    @apply btn bg-accent text-white font-semibold;
+  }
+  .btn-primary:hover:not(:disabled) {
+    @apply bg-accentHover;
+  }
+
+  /* Secondary button */
+  .btn-secondary {
+    @apply btn border border-border bg-surface text-ink;
+  }
+  .btn-secondary:hover:not(:disabled) {
+    @apply bg-sunk;
+  }
+
+  /* Icon button */
+  .btn-icon {
+    @apply inline-flex items-center justify-center
+           rounded-full border border-border bg-surface text-inkMuted
+           transition-colors duration-150;
+  }
+  .btn-icon:hover {
+    @apply bg-sunk text-ink;
+  }
+
+  /* Field */
+  .field {
+    @apply w-full rounded-[14px] border border-border bg-surface
+           px-4 py-[10px] text-xxs text-ink
+           outline-none
+           transition-shadow duration-150
+           placeholder:text-inkMuted;
+  }
+  .field:focus {
+    @apply border-accent ring-2 ring-accentSoft;
+  }
+
+  /* Pill */
+  .pill {
+    @apply inline-flex items-center gap-1.5
+           rounded-full px-3 py-1 text-[11px] font-medium;
+  }
+
+  /* Row item */
+  .row-item {
+    @apply rounded-[14px] border border-border bg-surface
+           transition-colors duration-150;
+  }
+
+  /* Progress track & fill */
+  .track {
+    @apply rounded-full bg-sunk overflow-hidden;
+  }
+  .track-fill {
+    @apply h-full rounded-full bg-accent;
+  }
+
+  /* Section label */
+  .section-label {
+    @apply font-sans text-[11px] font-medium uppercase tracking-[0.12em] text-inkMuted;
+  }
+
+}
+
+/* ─── Sign-in step transition ─────────────────────────────────────────────── */
+
+.signin-stack {
+  position: relative;
+  transition: height 320ms ease-out;
+}
+
+.signin-step {
+  transition:
+    opacity 320ms ease-out,
+    transform 320ms ease-out,
+    visibility 0s linear 320ms;
+}
+
+.signin-step[data-state="active"] {
+  position: relative;
+  opacity: 1;
+  transform: translateX(0);
+  visibility: visible;
+  transition:
+    opacity 320ms ease-out,
+    transform 320ms ease-out,
+    visibility 0s linear 0ms;
+}
+
+.signin-step[data-state="before"] {
+  position: absolute;
+  top: 0;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateX(-24px);
+}
+
+.signin-step[data-state="after"] {
+  position: absolute;
+  top: 0;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateX(24px);
+}
+
+/* Code-box stagger */
+.code-box {
+  transition:
+    opacity 320ms ease-out,
+    transform 320ms ease-out,
+    border-color 150ms,
+    box-shadow 150ms;
+  transition-delay: calc(var(--box-index, 0) * 45ms);
+}
+
+.signin-step[data-state="active"] .code-box {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.signin-step[data-state="before"] .code-box,
+.signin-step[data-state="after"] .code-box {
+  opacity: 0;
+  transform: translateY(10px);
+  transition-delay: 0ms;
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .signin-stack,
+  .signin-step,
+  .code-box {
+    transition: none !important;
+    transition-delay: 0ms !important;
+  }
+}
+
+/* ─── Keyframe animations ──────────────────────────────────────────────────── */
+
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(3px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes pop {
+  from { opacity: 0; transform: scale(0.6); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+@keyframes marker-in {
+  from { opacity: 0; transform: scaleY(0.2); }
+  to   { opacity: 1; transform: scaleY(1); }
+}
+
+@keyframes scan {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(300%); }
+}
+
+@keyframes halo {
+  0%   { box-shadow: 0 0 0 0   color-mix(in srgb, var(--color-accent) 28%, transparent); }
+  100% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--color-accent)  0%, transparent); }
+}
+
+.animate-fade-up {
+  animation: fade-up 220ms ease-out both;
+}
+
+.animate-pop {
+  animation: pop 180ms cubic-bezier(0.2, 0.9, 0.3, 1.4) both;
+}
+
+.animate-marker-in {
+  animation: marker-in 200ms ease-out both;
+  transform-origin: center;
+}
+
+.animate-scan {
+  animation: scan 1.4s linear infinite;
+}
+
+.animate-halo {
+  animation: halo 2.4s ease-out infinite;
+}
+
+/* ─── Print styles ─────────────────────────────────────────────────────────── */
+
+/* On-screen: printed sheets read as paper floating in a dark room */
+#print-root .sheet {
+  box-shadow: var(--shadow-float);
+}
+
+@media print {
+  html, body {
+    background: var(--color-paper) !important;
+    height: auto !important;
+  }
+
+  /* Hide the app shell and non-printing elements */
+  [data-app-shell],
+  [data-no-print] {
+    display: none !important;
+  }
+
+  /* Reset the print root */
+  #print-root {
+    position: static !important;
+    display: block !important;
+    overflow: visible !important;
+    width: auto !important;
+    height: auto !important;
+    background: var(--color-paper) !important;
+  }
+
+  /* Reset the scrolling container inside the print root */
+  #print-root > * {
+    position: static !important;
+    display: block !important;
+    overflow: visible !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  /* Force the sheet stack to plain block — Chrome won't fragment flex children */
+  #print-root .sheet-stack {
+    display: block !important;
+    margin: 0 !important;
+    gap: 0 !important;
+  }
+
+  /* Individual sheets */
+  #print-root .sheet {
+    box-shadow: none !important;
+    border: none !important;
+    outline: none !important;
+    margin: 0 !important;
+    break-inside: avoid !important;
+    page-break-after: always !important;
+    print-color-adjust: exact !important;
+    -webkit-print-color-adjust: exact !important;
+  }
+
+  #print-root .sheet:last-child {
+    page-break-after: auto !important;
+  }
+
+  #print-root .sheet,
+  #print-root .sheet * {
+    print-color-adjust: exact !important;
+    -webkit-print-color-adjust: exact !important;
+  }
+}
