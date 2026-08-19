@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git check-ignore *)",
+      "Bash(npx tsc *)",
+      "Bash(curl -s -X POST http://localhost:3000/api/ask -H \"Content-Type: application/json\" -d '{\"query\":\"How do I sign in?\"}')",
+      "Bash(curl -s -X POST http://localhost:3000/api/ask -H \"Content-Type: application/json\" -d '{\"query\":\"How do I delete a downloaded video?\"}')",
+      "Bash(cd \"c:/Users/ardaa/Desktop/compass\" && mkdir -p knowledge/youtube/images && mv public/images/youtube/*.png knowledge/youtube/images/ && rm -rf public/images && echo \"---moved---\" && ls -la knowledge/youtube/images/)"
+    ],
+    "additionalDirectories": [
+      "c:\\Users\\ardaa\\Desktop\\compass\\public\\images\\youtube"
+    ]
+  }
+}

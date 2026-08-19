@@ -10,46 +10,19 @@
 import { useCallback, useEffect, useMemo, useReducer, useState } from 'react'
 import { LogOut, Sparkles } from 'lucide-react'
 import type { Profile, Role, Topic } from '@/lib/types'
+import type { AnswerStep } from '@/lib/guideTypes'
 import { consoleReducer, initConsoleState } from '@/lib/consoleState'
 import { Lockup } from '@/components/Wordmark'
 import ProgressIndicator from './ProgressIndicator'
 import AskBar from './AskBar'
 import TopicDetail from './TopicDetail'
+import GuideAnswer from './GuideAnswer'
 import ProfileView from './ProfileView'
 import type { StripItem } from './ProgrammeStrip'
 import SupervisorPage from './SupervisorPage'
 import SupervisorProfilePage from './SupervisorProfilePage'
 import ReportPanel, { type ExportConfig } from './ReportPanel'
 import PdfPreview from '../pdf/PdfPreview'
-
-// ─── Query matcher ────────────────────────────────────────────────────────────
-
-// Good enough for a demo where whatever is typed should still land on a real,
-// relevant answer. Lowercase, split on non-alphanumeric, drop words ≤2 chars,
-// score each topic by how many of those words appear in its title/answer/detail/system.
-function matchTopic(topics: Topic[], query: string): Topic {
-  const words = query
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter(w => w.length > 2)
-
-  if (words.length === 0 || topics.length === 0) return topics[0]!
-
-  let bestScore = -1
-  let best      = topics[0]!
-
-  for (const topic of topics) {
-    const haystack = [topic.title, topic.answer, topic.detail, topic.system]
-      .join(' ')
-      .toLowerCase()
-    const score = words.filter(w => haystack.includes(w)).length
-    if (score > bestScore) {
-      bestScore = score
-      best      = topic
-    }
-  }
-  return best
-}
 
 // ─── Mode type ────────────────────────────────────────────────────────────────
 
@@ -74,6 +47,9 @@ export default function ConsoleShell({
   const [state,    dispatch]    = useReducer(consoleReducer, profile, initConsoleState)
   const [mode,     setMode]     = useState<Mode>(isSupervisor ? 'supervisor' : 'mentor')
   const [query,    setQuery]    = useState('')
+  const [asking,   setAsking]   = useState(false)
+  const [askError, setAskError] = useState<string | null>(null)
+  const [steps,    setSteps]    = useState<AnswerStep[] | null>(null)
   const [reportOpen, setReportOpen] = useState(false)
   const [previewOpen, setPreviewOpen] = useState(false)
   const [exportConfig, setExportConfig] = useState<ExportConfig>({
@@ -94,12 +70,29 @@ export default function ConsoleShell({
 
   // ── Ask handler ───────────────────────────────────────────────────────────
 
-  const handleAsk = useCallback((q: string) => {
-    const winner = matchTopic(topics, q)
-    dispatch({ type: 'SELECT', list: 'topics', id: winner.id })
+  const handleAsk = useCallback(async (q: string) => {
+    // A live "Ask Compass" answer is rendered on its own — it is NOT forced into
+    // a pre-authored topic, so no day/system/step chrome leaks in.
     setQuery(q)
     setMode('mentor')
-  }, [topics])
+    setAskError(null)
+    setSteps(null)
+    setAsking(true)
+    try {
+      const res = await fetch('/api/ask', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ query: q, persona }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data?.error || `Request failed (${res.status}).`)
+      setSteps(Array.isArray(data.steps) ? data.steps : [])
+    } catch (err) {
+      setAskError(err instanceof Error ? err.message : 'Something went wrong asking Compass.')
+    } finally {
+      setAsking(false)
+    }
+  }, [persona])
 
   // ── Pick topic directly (from profile strip) ──────────────────────────────
 
@@ -108,6 +101,7 @@ export default function ConsoleShell({
     if (!topic) return
     dispatch({ type: 'SELECT', list: 'topics', id })
     setQuery(topic.title)
+    setSteps(null)   // show the pre-authored topic, not a live answer
     setMode('mentor')
   }, [topics, dispatch])
 
@@ -237,6 +231,77 @@ export default function ConsoleShell({
     )
   }
 
+  // ── Mentor loading state ──────────────────────────────────────────────────
+
+  function AskLoading({ query }: { query: string }) {
+    return (
+      <div
+        style={{
+          flex:           1,
+          display:        'flex',
+          flexDirection:  'column',
+          alignItems:     'center',
+          justifyContent: 'center',
+          padding:        '0 32px',
+          gap:            16,
+          maxWidth:       420,
+          margin:         '0 auto',
+          textAlign:      'center',
+        }}
+      >
+        <Sparkles
+          size={26}
+          strokeWidth={1.8}
+          color="var(--color-violet)"
+          style={{ animation: 'pulse 1.2s ease-in-out infinite' }}
+        />
+        <p style={{ margin: 0, fontSize: 15, fontWeight: 600, color: 'var(--color-ink)' }}>
+          Compass is thinking…
+        </p>
+        <p style={{ margin: 0, fontSize: 13, lineHeight: 1.6, color: 'var(--color-ink-muted)' }}>
+          “{query}”
+        </p>
+        <style>{`@keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: 0.35 } }`}</style>
+      </div>
+    )
+  }
+
+  // ── Mentor error state ────────────────────────────────────────────────────
+
+  function AskError({ query, message }: { query: string; message: string }) {
+    return (
+      <div
+        style={{
+          flex:           1,
+          display:        'flex',
+          flexDirection:  'column',
+          alignItems:     'center',
+          justifyContent: 'center',
+          padding:        '0 32px',
+          gap:            12,
+          maxWidth:       440,
+          margin:         '0 auto',
+          textAlign:      'center',
+        }}
+      >
+        <h2 style={{ margin: 0, fontSize: 16, fontWeight: 600, color: 'var(--color-ink)' }}>
+          Couldn&rsquo;t reach Compass
+        </h2>
+        <p style={{ margin: 0, fontSize: 13, lineHeight: 1.6, color: 'var(--color-ink-muted)' }}>
+          {message}
+        </p>
+        <button
+          type="button"
+          className="btn-secondary"
+          onClick={() => handleAsk(query)}
+          style={{ marginTop: 4 }}
+        >
+          Try again
+        </button>
+      </div>
+    )
+  }
+
   // ── Body switch ───────────────────────────────────────────────────────────
 
   function Body() {
@@ -277,16 +342,31 @@ export default function ConsoleShell({
 
         {/* Main area */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-          {query && activeTopic
-            ? (
-              <TopicDetail
-                topic={activeTopic}
-                query={query}
-                dispatch={dispatch}
-                onReport={handleOpenReport}
-              />
-            )
-            : <MentorEmpty />
+          {!query
+            ? <MentorEmpty />
+            : asking
+              ? <AskLoading query={query} />
+              : askError
+                ? <AskError query={query} message={askError} />
+                : steps !== null
+                  ? (
+                    <GuideAnswer
+                      query={query}
+                      steps={steps}
+                      onReport={handleOpenReport}
+                      onAskAgain={() => handleAsk(query)}
+                    />
+                  )
+                  : activeTopic
+                    ? (
+                      <TopicDetail
+                        topic={activeTopic}
+                        query={query}
+                        dispatch={dispatch}
+                        onReport={handleOpenReport}
+                      />
+                    )
+                    : <MentorEmpty />
           }
         </div>
       </div>

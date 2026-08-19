@@ -1,0 +1,26 @@
+{
+  "title": "YouTube",
+  "description": "Using YouTube: accounts and sign-in, the interface and buttons, watching videos, subtitles, uploading, downloads, playlists and settings.",
+  "images": [
+    {
+      "id": "signin-home",
+      "file": "images/signin-1-home.png",
+      "alt": "YouTube home page while signed out, with the Sign in button in the top-right and another Sign in button in the left sidebar."
+    },
+    {
+      "id": "signin-email",
+      "file": "images/signin-2-email.png",
+      "alt": "Google 'Sign in - to continue to YouTube' screen with the 'Email or phone' field, plus Forgot email, Create account and Next."
+    },
+    {
+      "id": "signin-password",
+      "file": "images/signin-3-password.png",
+      "alt": "Google 'Enter your password' screen showing the account name, a password field, a 'Show password' checkbox and Next."
+    },
+    {
+      "id": "signin-verify",
+      "file": "images/signin-4-verify.png",
+      "alt": "Google '2-Step Verification / Check your device' screen asking you to tap Yes on the prompt sent to your phone."
+    }
+  ]
+}
