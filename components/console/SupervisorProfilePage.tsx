@@ -9,47 +9,29 @@
 'use client'
 
 import type { Profile } from '@/lib/types'
-import { ROSTER } from '@/lib/supervisorData'
-
-// ─── Work email helper ────────────────────────────────────────────────────────
-
-/**
- * Turns whatever was typed at sign-in into a plausible mock work email.
- * Cosmetic only — dana.okafor@meridianltd.com from "Dana Okafor" at "Meridian Ltd".
- */
-function mockEmail(name: string, company: string): string {
-  const slug = (s: string) =>
-    s.toLowerCase().replace(/[^a-z0-9]/g, '') || 'hello'
-  const parts  = name.trim().split(/\s+/).map(w => w.replace(/[^a-zA-Z]/g, '').toLowerCase()).filter(Boolean)
-  const local  = parts.length >= 2 ? `${parts[0]}.${parts[parts.length - 1]}` : parts[0] ?? 'hello'
-  const domain = slug(company) || 'brightfield'
-  return `${local}@${domain}.com`
-}
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 
 interface SupervisorProfilePageProps {
-  profile: Profile
+  profile:       Profile
+  /** Real email from the authenticated user. */
+  email:         string
+  /** Live count of interns assigned to this supervisor. */
+  internCount:   number
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function SupervisorProfilePage({ profile }: SupervisorProfilePageProps) {
+export default function SupervisorProfilePage({ profile, email, internCount }: SupervisorProfilePageProps) {
   const { persona } = profile
-  const firstName = persona.name.split(' ')[0] ?? persona.name
-  const company   = profile.systemsMeta.workspaceName || 'Brightfield'
-  const email     = mockEmail(persona.name, company)
-  const rosterCount = ROSTER.length
-  const noun = rosterCount === 1 ? 'new starter' : 'new starters'
+  const company   = profile.systemsMeta.workspaceName || ''
+  const noun = internCount === 1 ? 'new starter' : 'new starters'
 
   const recordRows: { label: string; value: string }[] = [
     { label: 'Name',       value: persona.name },
     { label: 'Role',       value: 'Supervisor' },
-    { label: 'Team',       value: 'People Operations' },
     { label: 'Company',    value: company },
     { label: 'Work email', value: email },
-    { label: 'Start date', value: '12 Jan 2023' },
-    { label: 'Reports to', value: 'Naomi Kestrel' },
   ]
 
   return (
@@ -118,7 +100,7 @@ export default function SupervisorProfilePage({ profile }: SupervisorProfilePage
               fontVariantNumeric: 'tabular-nums',
             }}
           >
-            {rosterCount} {noun}
+            {internCount} {noun}
           </span>
         </div>
 

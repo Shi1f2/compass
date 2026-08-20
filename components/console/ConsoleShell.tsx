@@ -10,10 +10,11 @@
 import { useCallback, useEffect, useMemo, useReducer, useState } from 'react'
 import { LogOut, Sparkles } from 'lucide-react'
 import type { Profile, Role, Topic } from '@/lib/types'
+import InternTasks from './InternTasks'
+import type { Starter } from '@/lib/supervisorData'
 import type { AnswerStep } from '@/lib/guideTypes'
 import { consoleReducer, initConsoleState } from '@/lib/consoleState'
 import { Lockup } from '@/components/Wordmark'
-import ProgressIndicator from './ProgressIndicator'
 import AskBar from './AskBar'
 import TopicDetail from './TopicDetail'
 import GuideAnswer from './GuideAnswer'
@@ -23,24 +24,39 @@ import SupervisorPage from './SupervisorPage'
 import SupervisorProfilePage from './SupervisorProfilePage'
 import ReportPanel, { type ExportConfig } from './ReportPanel'
 import PdfPreview from '../pdf/PdfPreview'
+import QuizLibrary from './QuizLibrary'
+import InternQuizView from './InternQuizView'
 
 // ─── Mode type ────────────────────────────────────────────────────────────────
 
-type Mode = 'mentor' | 'profile' | 'supervisor'
+type Mode = 'mentor' | 'profile' | 'supervisor' | 'tasks' | 'quizzes'
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 
 interface ConsoleShellProps {
-  profile:   Profile
-  role:      Role
-  company:   string
-  onSignOut: () => void
+  profile:    Profile
+  role:       Role
+  company:    string
+  onSignOut:  () => void
+  /** Supervisor only: real roster from the DB. */
+  roster?:    Starter[]
+  /** Supervisor only: server action to send an invite. */
+  onInvite?:  (email: string, jobRoleId: string) => Promise<string | null>
+  /** Supervisor only: the authenticated user's real email. */
+  email?:     string
+  /** Supervisor only: live count of interns under this supervisor. */
+  internCount?: number
+  /** Supervisor only: org UUID — required to scope the quiz library. */
+  orgId?:       string
+  /** When true, illustrative sample content is active. Shows a badge in the header. */
+  demoContent?: boolean
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function ConsoleShell({
-  profile, role, company, onSignOut,
+  profile, role, company, onSignOut, roster = [], onInvite, email = '', internCount = 0,
+  orgId = '', demoContent = false,
 }: ConsoleShellProps) {
   const isSupervisor = role === 'supervisor'
 
@@ -141,10 +157,13 @@ export default function ConsoleShell({
   const tabs: { id: Mode; label: string }[] = isSupervisor
     ? [
         { id: 'supervisor', label: 'Supervisor' },
+        { id: 'quizzes',    label: 'Quizzes'    },
         { id: 'profile',    label: persona.name },
       ]
     : [
         { id: 'mentor',  label: 'Mentor'      },
+        { id: 'tasks',   label: 'Tasks'       },
+        { id: 'quizzes', label: 'Quizzes'     },
         { id: 'profile', label: persona.name  },
       ]
 
@@ -305,11 +324,32 @@ export default function ConsoleShell({
   // ── Body switch ───────────────────────────────────────────────────────────
 
   function Body() {
+    if (mode === 'tasks') {
+      return <InternTasks />
+    }
+    if (mode === 'quizzes' && isSupervisor) {
+      return <QuizLibrary orgId={orgId} />
+    }
+    if (mode === 'quizzes' && !isSupervisor) {
+      return (
+        <div className="thin-scroll" style={{ flex: 1, overflowY: 'auto', padding: '24px 28px' }}>
+          <InternQuizView />
+        </div>
+      )
+    }
     if (mode === 'supervisor') {
-      return <SupervisorPage name={persona.name} company={company || state.profile.systemsMeta.workspaceName} />
+      return (
+        <SupervisorPage
+          name={persona.name}
+          company={company || state.profile.systemsMeta.workspaceName}
+          orgId={orgId}
+          roster={roster}
+          onInvite={onInvite ?? (async () => null)}
+        />
+      )
     }
     if (mode === 'profile' && isSupervisor) {
-      return <SupervisorProfilePage profile={state.profile} />
+      return <SupervisorProfilePage profile={state.profile} email={email} internCount={internCount} />
     }
     if (mode === 'profile') {
       return (
@@ -433,8 +473,21 @@ export default function ConsoleShell({
               marginLeft:     'auto',
             }}
           >
-            {!isSupervisor && (
-              <ProgressIndicator pct={state.profile.onboardingPct} />
+            {demoContent && (
+              <span
+                style={{
+                  fontSize:     11,
+                  fontWeight:   500,
+                  padding:      '4px 10px',
+                  borderRadius: 9999,
+                  background:   'var(--color-yellow-soft)',
+                  color:        'var(--color-waiting)',
+                  whiteSpace:   'nowrap',
+                  flexShrink:   0,
+                }}
+              >
+                Sample content
+              </span>
             )}
             <button
               type="button"

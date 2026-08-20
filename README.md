@@ -2,7 +2,7 @@
 
 **Find your bearings.** Compass is an embedded onboarding assistant that already knows an employee's systems, their role, and their first ninety days — mentor, tutor and compliance record in one.
 
-This repository is a **front-end-only demo**. There is no backend, no API routes, no server actions, no database, no ORM, and no browser storage of any kind. Every piece of data is hardcoded in TypeScript files in `lib/`. All state lives in React memory and disappears when the page is refreshed. The application builds and runs with no network access at all; the font fallback stack covers the case where Google Fonts is unreachable.
+Compass is a Next.js App Router application backed by Supabase. Authentication is invite-only OTP email. Two roles — **supervisor** and **intern** — are enforced by JWT `app_metadata` and Postgres RLS. The application is also used for demo presentations; onboarding content (topics, quiz) is seeded from static TypeScript files until the knowledge backend is wired.
 
 ---
 
@@ -27,14 +27,14 @@ Requires Node 18 or later.
 | Language | TypeScript 5, strict mode |
 | Styling | Tailwind CSS 3.4 + PostCSS + autoprefixer |
 | Icons | lucide-react 0.454 |
-
-No other runtime dependencies. No UI kit, no state library, no data-fetching library.
+| Auth / DB | Supabase (PostgreSQL + Auth + RLS) |
+| Email | Resend (Supabase custom SMTP) |
 
 ---
 
 ## Two roles
 
-Sign-in is a two-step flow: email → six-character code. The email drives the persona shown in the app (name and company are derived from it). The code is accepted regardless of what you type. A checkbox on the code step switches between the two roles.
+Sign-in is a two-step OTP flow: email → six-digit code. The system is invite-only — only provisioned accounts receive a code. Roles are read from the account's JWT `app_metadata`; there is no role chooser at sign-in.
 
 ### New starter
 
@@ -135,6 +135,49 @@ public/
 
 ---
 
-## Front-end only — explicit statement
+## Operations
 
-This application has no backend of any kind. It makes no network requests, calls no APIs, writes to no databases, and persists nothing in the browser. Refreshing the page resets the app to the sign-in screen. All data is hardcoded in `lib/data.ts` and `lib/supervisorData.ts`. This is intentional: the demo is designed to run fully offline, in air-gapped environments, and in browser demos where network access cannot be guaranteed.
+### Running the migration
+
+Apply the schema once to your Supabase project. Either:
+
+```bash
+# With the Supabase CLI:
+supabase db push
+
+# Or paste supabase/migrations/20250101000000_initial_schema.sql
+# directly into the Supabase SQL editor.
+```
+
+### Configuring Resend SMTP
+
+1. In the Resend dashboard, create an API key with **Full access**.
+2. In the Supabase dashboard, go to **Project Settings → Auth → SMTP**.
+3. Enable custom SMTP and set:
+   - Host: `smtp.resend.com`
+   - Port: `465`
+   - Username: `resend`
+   - Password: your Resend API key
+   - Sender name and address: your verified sending domain
+4. Set **OTP expiry** to `600` seconds (10 minutes) under **Authentication → Providers → Email**.
+5. Optionally customise the OTP email template under **Authentication → Email Templates → Magic Link / OTP**.
+
+### Provisioning the first organisation
+
+Run the provision script once per organisation. It creates the organisation row, the first supervisor's auth user, and sends them an invite email.
+
+```bash
+npm run provision -- \
+  --org  "Acme Corp" \
+  --domain "acme.com" \
+  --email "alice@acme.com" \
+  --name  "Alice Smith"
+```
+
+Requires `NEXT_PUBLIC_SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and `NEXT_PUBLIC_SITE_URL` to be set in `.env.local`.
+
+The supervisor can then sign in at `/login` with their company email and the OTP sent to their inbox.
+
+### Inviting interns
+
+Once a supervisor is signed in, they use the **Invite new starter** button in the supervisor console. The server action verifies the caller's role from their JWT, checks that the invited address matches the organisation domain, creates the auth user, writes the profile and invitation rows, and sends a magic-link email.

@@ -5,34 +5,39 @@
 'use client'
 
 import React, {
-  useEffect, useReducer, useRef, useState,
+  useCallback, useEffect, useReducer, useRef, useState,
 } from 'react'
 import {
   ArrowLeft, Check, GraduationCap,
-  Plus, Search, Shield, X,
+  Pencil, Plus, Search, Trash2, X,
 } from 'lucide-react'
 import {
-  ROSTER, PASS_THRESHOLD, ROLE_CHECKLISTS,
+  PASS_THRESHOLD,
   answeredCount, averageScore,
-  doneCount, setupPct, knowledgePct,
+  taskPct, knowledgePct,
   type Starter,
-  type InviteRole, type InviteChecklistItem,
 } from '@/lib/supervisorData'
+import { createClient } from '@/lib/supabase/client'
+import type { JobRole, TaskTemplate } from '@/lib/database.types'
+import {
+  createJobRole,
+  renameJobRole,
+  deleteJobRole,
+  countProfilesForRole,
+  createTaskTemplate,
+  renameTaskTemplate,
+  deleteTaskTemplate,
+} from '@/lib/settings-actions'
 import { groupByDay, NOT_ATTEMPTED } from '@/lib/quizGroup'
 import type { Question } from '@/lib/types'
-import {
-  PROGRAMME, topicState,
-  programmeDoneTasks, programmeTotalTasks, programmeCompletionPct,
-} from '@/lib/onboarding'
-import type { ProgramTopic } from '@/lib/onboarding'
 import TutorDayList from './TutorDayList'
 import TutorQuestionView from './TutorQuestionView'
+import InternTasksView from './InternTasksView'
+import AssignmentPanel from './AssignmentPanel'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-const INVITE_ROLES: InviteRole[] = ['Engineer', 'Analyst', 'Contractor', 'Support', 'Marketing']
-const CHECKLIST_SYSTEMS = ['ITSM', 'HRIS', 'Docs', 'Project', 'Device'] as const
 
 // ─── Avatar ───────────────────────────────────────────────────────────────────
 
@@ -127,115 +132,486 @@ function KnowledgeToggle({ on, onChange }: { on: boolean; onChange: () => void }
   )
 }
 
-// ─── Invite row ───────────────────────────────────────────────────────────────
+// ─── Invite dialog ────────────────────────────────────────────────────────────
+//
+// Two views rendered inside the same fixed overlay:
+//   'invite'      — email + role pills + optional details + footer
+//   'role-editor' — create a new role or edit an existing one in-place
 
-function InviteRow({
-  item, onChange, onRemove,
-}: {
-  item:     InviteChecklistItem
-  onChange: (patch: Partial<InviteChecklistItem>) => void
+interface InviteDialogProps {
+  onClose: () => void
+  onSent:  (email: string, jobRoleId: string) => void
+}
+
+// ── Tiny reusable task-item row used inside the role editor ───────────────────
+
+interface TaskItemRowProps {
+  value:    string
+  index:    number
+  total:    number
+  onChange: (v: string) => void
   onRemove: () => void
-}) {
+  onMove:   (dir: -1 | 1) => void
+}
+
+function TaskItemRow({ value, index, total, onChange, onRemove, onMove }: TaskItemRowProps) {
   return (
-    <div
-      className="row-item"
-      style={{
-        display: 'flex', alignItems: 'center', gap: 10,
-        padding: '10px 14px',
-      }}
-    >
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+        <button
+          type="button"
+          disabled={index === 0}
+          onClick={() => onMove(-1)}
+          aria-label="Move up"
+          style={{
+            background: 'none', border: 'none', cursor: index === 0 ? 'default' : 'pointer',
+            padding: '1px 3px', lineHeight: 1, fontSize: 10, color: 'var(--color-ink-muted)',
+            opacity: index === 0 ? 0.25 : 1, fontFamily: 'var(--font-sans)',
+          }}
+        >▲</button>
+        <button
+          type="button"
+          disabled={index === total - 1}
+          onClick={() => onMove(1)}
+          aria-label="Move down"
+          style={{
+            background: 'none', border: 'none', cursor: index === total - 1 ? 'default' : 'pointer',
+            padding: '1px 3px', lineHeight: 1, fontSize: 10, color: 'var(--color-ink-muted)',
+            opacity: index === total - 1 ? 0.25 : 1, fontFamily: 'var(--font-sans)',
+          }}
+        >▼</button>
+      </div>
       <input
-        type="checkbox"
-        checked={item.included}
-        onChange={e => onChange({ included: e.target.checked })}
-        style={{ accentColor: 'var(--color-accent)', flexShrink: 0 }}
+        type="text"
+        className="field"
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        placeholder="Task title"
+        style={{ flex: 1, fontSize: 13 }}
       />
-      <select
-        value={item.system}
-        onChange={e => onChange({ system: e.target.value as typeof item.system })}
-        style={{
-          fontSize: 11, borderRadius: 9999, border: 'none',
-          background: 'var(--color-sunk)', padding: '3px 8px',
-          color: 'var(--color-ink-muted)', cursor: 'pointer',
-          textTransform: 'uppercase', fontFamily: 'var(--font-sans)',
-        }}
-      >
-        {CHECKLIST_SYSTEMS.map(s => <option key={s} value={s}>{s}</option>)}
-      </select>
-      <span
-        style={{
-          flex: 1, fontSize: 12, fontWeight: 500, minWidth: 0,
-          color: item.included ? 'var(--color-ink)' : 'var(--color-ink-muted)',
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        }}
-      >
-        {item.label}
-      </span>
-      <KnowledgeToggle on={item.hasKnowledge} onChange={() => onChange({ hasKnowledge: !item.hasKnowledge })} />
       <button
         type="button"
         onClick={onRemove}
+        aria-label="Remove task"
         style={{
-          width: 24, height: 24, borderRadius: '50%',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          border: '1px solid var(--color-border)', background: 'var(--color-surface)',
-          cursor: 'pointer', color: 'var(--color-ink-muted)', flexShrink: 0,
+          background: 'none', border: 'none', cursor: 'pointer',
+          padding: 4, color: 'var(--color-ink-muted)', display: 'flex', flexShrink: 0,
         }}
       >
-        <X size={11} />
+        <X size={14} />
       </button>
     </div>
   )
 }
 
-// ─── Invite dialog ────────────────────────────────────────────────────────────
+// ── Role editor (create or edit) ──────────────────────────────────────────────
 
-interface InviteDialogProps {
-  onClose:    () => void
-  onSent:     (email: string, role: InviteRole) => void
+interface DraftItem { key: string; title: string }
+
+interface RoleEditorProps {
+  /** Null = create new role; non-null = edit existing */
+  role:         JobRole | null
+  orgId:        string
+  onSaved:      (role: JobRole) => void
+  onBack:       () => void
+  onRoleDeleted: (roleId: string) => void
 }
 
+function RoleEditor({ role, orgId, onSaved, onBack, onRoleDeleted }: RoleEditorProps) {
+  const supabase = createClient()
+  const isNew = role === null
+
+  const [roleName,   setRoleName]   = useState(role?.name ?? '')
+  const [items,      setItems]      = useState<DraftItem[]>([])
+  const [saving,     setSaving]     = useState(false)
+  const [error,      setError]      = useState('')
+  // For edit mode: track the live templates so we can diff against drafts
+  const [origTemplates, setOrigTemplates] = useState<TaskTemplate[]>([])
+  const [loadingTemplates, setLoadingTemplates] = useState(!isNew)
+
+  // Delete-role confirmation state
+  const [deleteConfirm, setDeleteConfirm]     = useState(false)
+  const [affectedCount, setAffectedCount]     = useState(0)
+  const [loadingDelete, setLoadingDelete]     = useState(false)
+
+  const nameRef = useRef<HTMLInputElement>(null)
+
+  // Focus name field on open
+  useEffect(() => { nameRef.current?.focus() }, [])
+
+  // Load existing templates when editing
+  useEffect(() => {
+    if (isNew || !role) return
+    let active = true
+    ;(supabase
+      .from('task_templates')
+      .select('*')
+      .eq('job_role_id', role.id)
+      .eq('org_id', orgId)
+      .order('order_index', { ascending: true }) as unknown as Promise<{ data: TaskTemplate[] | null }>)
+      .then(({ data }) => {
+        if (!active) return
+        const templates = data ?? []
+        setOrigTemplates(templates)
+        setItems(templates.map(t => ({ key: t.id, title: t.title })))
+        setLoadingTemplates(false)
+      })
+    return () => { active = false }
+  }, [isNew, role, orgId, supabase])
+
+  function addItem() {
+    setItems(prev => [...prev, { key: `new-${Date.now()}`, title: '' }])
+  }
+
+  function updateItem(index: number, title: string) {
+    setItems(prev => prev.map((it, i) => i === index ? { ...it, title } : it))
+  }
+
+  function removeItem(index: number) {
+    setItems(prev => prev.filter((_, i) => i !== index))
+  }
+
+  function moveItem(index: number, dir: -1 | 1) {
+    const next = [...items]
+    const swap = index + dir
+    if (swap < 0 || swap >= next.length) return
+    ;[next[index], next[swap]] = [next[swap]!, next[index]!]
+    setItems(next)
+  }
+
+  async function handleSave() {
+    const name = roleName.trim()
+    if (!name) { setError('Role name is required.'); return }
+    setSaving(true)
+    setError('')
+
+    const validItems = items.filter(it => it.title.trim())
+
+    if (isNew) {
+      // ── Create role ──────────────────────────────────────────────────────────
+      const { error: roleErr } = await createJobRole(name)
+      if (roleErr) { setError(roleErr); setSaving(false); return }
+
+      // Fetch the row we just created so we have its id
+      const { data: rows } = await supabase
+        .from('job_roles')
+        .select('*')
+        .eq('org_id', orgId)
+        .order('created_at', { ascending: false })
+        .limit(1) as unknown as { data: JobRole[] | null }
+      const newRole = rows?.[0]
+      if (!newRole) { setError('Role created but could not reload it.'); setSaving(false); return }
+
+      // Create task templates
+      for (let i = 0; i < validItems.length; i++) {
+        const { error: tmplErr } = await createTaskTemplate(newRole.id, validItems[i]!.title.trim(), i)
+        if (tmplErr) { setError(tmplErr); setSaving(false); return }
+      }
+      setSaving(false)
+      onSaved(newRole)
+    } else {
+      // ── Edit existing role ────────────────────────────────────────────────────
+      if (name !== role!.name) {
+        const { error: renameErr } = await renameJobRole(role!.id, name)
+        if (renameErr) { setError(renameErr); setSaving(false); return }
+      }
+
+      // Diff templates: delete removed, rename changed, add new
+      const origIds = new Set(origTemplates.map(t => t.id))
+      const draftIds = new Set(items.filter(it => origIds.has(it.key)).map(it => it.key))
+
+      // Delete templates no longer in the list
+      for (const orig of origTemplates) {
+        if (!draftIds.has(orig.id)) {
+          const { error: delErr } = await deleteTaskTemplate(orig.id)
+          if (delErr) { setError(delErr); setSaving(false); return }
+        }
+      }
+
+      // Rename changed templates
+      for (const item of items) {
+        if (!origIds.has(item.key)) continue
+        const orig = origTemplates.find(t => t.id === item.key)
+        if (orig && orig.title !== item.title.trim() && item.title.trim()) {
+          const { error: renErr } = await renameTaskTemplate(item.key, item.title.trim())
+          if (renErr) { setError(renErr); setSaving(false); return }
+        }
+      }
+
+      // Add newly created items (keys starting with 'new-')
+      const newItems = items.filter(it => !origIds.has(it.key) && it.title.trim())
+      for (let i = 0; i < newItems.length; i++) {
+        const orderIndex = origTemplates.length + i
+        const { error: addErr } = await createTaskTemplate(role!.id, newItems[i]!.title.trim(), orderIndex)
+        if (addErr) { setError(addErr); setSaving(false); return }
+      }
+
+      setSaving(false)
+      onSaved({ ...role!, name })
+    }
+  }
+
+  async function requestDelete() {
+    if (!role) return
+    setLoadingDelete(true)
+    const { count, error: cErr } = await countProfilesForRole(role.id)
+    if (cErr) { setError(cErr); setLoadingDelete(false); return }
+    setAffectedCount(count)
+    setLoadingDelete(false)
+    setDeleteConfirm(true)
+  }
+
+  async function confirmDelete() {
+    if (!role) return
+    const { error: delErr } = await deleteJobRole(role.id)
+    if (delErr) { setError(delErr); setDeleteConfirm(false); return }
+    onRoleDeleted(role.id)
+  }
+
+  if (deleteConfirm && role) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <button
+          type="button"
+          onClick={() => setDeleteConfirm(false)}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none',
+            cursor: 'pointer', fontSize: 13, color: 'var(--color-ink-muted)',
+            fontFamily: 'var(--font-sans)', padding: 0, alignSelf: 'flex-start',
+          }}
+        >
+          <ArrowLeft size={14} /> Back
+        </button>
+
+        <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>
+          Delete &ldquo;{role.name}&rdquo;?
+        </h3>
+
+        {affectedCount > 0 ? (
+          <p style={{ margin: 0, fontSize: 13, lineHeight: 1.6, color: 'var(--color-ink-muted)' }}>
+            <strong style={{ color: 'var(--color-ink)' }}>
+              {affectedCount} {affectedCount === 1 ? 'person' : 'people'}
+            </strong>{' '}
+            {affectedCount === 1 ? 'is' : 'are'} currently assigned this role.
+            Their existing tasks will not be deleted, but their role label will be cleared.
+            The role&rsquo;s task templates will be removed.
+          </p>
+        ) : (
+          <p style={{ margin: 0, fontSize: 13, lineHeight: 1.6, color: 'var(--color-ink-muted)' }}>
+            This will delete the role and all its task templates.
+            Tasks already assigned to people will not be affected.
+          </p>
+        )}
+
+        {error && <p style={{ margin: 0, fontSize: 12, color: 'var(--color-incorrect)' }}>{error}</p>}
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+          <button type="button" className="btn-secondary" onClick={() => setDeleteConfirm(false)}>Cancel</button>
+          <button
+            type="button"
+            onClick={confirmDelete}
+            style={{
+              padding: '10px 0', borderRadius: 9999, border: 'none', cursor: 'pointer',
+              fontSize: 13, fontWeight: 500, fontFamily: 'var(--font-sans)',
+              background: 'var(--color-incorrect)', color: '#fff',
+            }}
+          >
+            Delete role
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      {/* Header row */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <button
+          type="button"
+          onClick={onBack}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none',
+            cursor: 'pointer', fontSize: 13, color: 'var(--color-ink-muted)',
+            fontFamily: 'var(--font-sans)', padding: 0,
+          }}
+        >
+          <ArrowLeft size={14} /> Back
+        </button>
+        {!isNew && (
+          <button
+            type="button"
+            onClick={requestDelete}
+            disabled={loadingDelete}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: 'none',
+              cursor: 'pointer', fontSize: 12, color: 'var(--color-incorrect)',
+              fontFamily: 'var(--font-sans)', padding: '4px 8px',
+              opacity: loadingDelete ? 0.5 : 1,
+            }}
+          >
+            <Trash2 size={13} /> Delete role
+          </button>
+        )}
+      </div>
+
+      <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>
+        {isNew ? 'Create a role' : `Edit "${role!.name}"`}
+      </h2>
+
+      {/* Role name */}
+      <label style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 13 }}>
+        Role name
+        <input
+          ref={nameRef}
+          type="text"
+          className="field"
+          value={roleName}
+          onChange={e => { setRoleName(e.target.value); setError('') }}
+          placeholder="e.g. Graduate Analyst"
+        />
+      </label>
+
+      {/* Task checklist */}
+      <div>
+        <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 8 }}>
+          Default tasks
+          <span style={{ fontSize: 12, fontWeight: 400, color: 'var(--color-ink-muted)', marginLeft: 6 }}>
+            copied to each new starter with this role
+          </span>
+        </div>
+
+        {loadingTemplates ? (
+          <p style={{ fontSize: 13, color: 'var(--color-ink-muted)', margin: 0 }}>Loading…</p>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {items.map((item, i) => (
+              <TaskItemRow
+                key={item.key}
+                value={item.title}
+                index={i}
+                total={items.length}
+                onChange={v => updateItem(i, v)}
+                onRemove={() => removeItem(i)}
+                onMove={dir => moveItem(i, dir)}
+              />
+            ))}
+            <button
+              type="button"
+              onClick={addItem}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 5,
+                background: 'none', border: '1px dashed var(--color-border)',
+                borderRadius: 9999, cursor: 'pointer',
+                fontSize: 12, color: 'var(--color-ink-muted)',
+                padding: '6px 14px', fontFamily: 'var(--font-sans)',
+                alignSelf: 'flex-start',
+              }}
+            >
+              <Plus size={12} /> Add task
+            </button>
+          </div>
+        )}
+      </div>
+
+      {error && <p style={{ margin: 0, fontSize: 12, color: 'var(--color-incorrect)' }}>{error}</p>}
+
+      {/* Footer */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <button type="button" className="btn-secondary" onClick={onBack} disabled={saving}>
+          Cancel
+        </button>
+        <button
+          type="button"
+          className="btn-primary"
+          onClick={handleSave}
+          disabled={saving}
+        >
+          {saving ? 'Saving…' : isNew ? 'Create role' : 'Save changes'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ── Main InviteDialog ─────────────────────────────────────────────────────────
+
 function InviteDialog({ onClose, onSent }: InviteDialogProps) {
-  const [email,     setEmail]     = useState('')
-  const [role,      setRole]      = useState<InviteRole | null>(null)
-  const [rows,      setRows]      = useState<InviteChecklistItem[]>([])
-  const [error,     setError]     = useState('')
+  const supabase = createClient()
+
+  // ── Invite-view state ──────────────────────────────────────────────────────
+  const [email,        setEmail]       = useState('')
+  const [jobRoleId,    setJobRoleId]   = useState<string | null>(null)
+  const [roles,        setRoles]       = useState<JobRole[]>([])
+  const [rolesLoading, setRolesLoading] = useState(true)
+  const [error,        setError]       = useState('')
   const emailRef = useRef<HTMLInputElement>(null)
 
-  useEffect(() => { emailRef.current?.focus() }, [])
+  // ── Role-editor state ──────────────────────────────────────────────────────
+  // null = invite view; { role: null } = create new; { role: JobRole } = edit
+  const [editorTarget, setEditorTarget] = useState<{ role: JobRole | null } | null>(null)
+  const [orgId, setOrgId] = useState<string | null>(null)
 
-  // Escape to close
+  // Escape closes the dialog (not just the editor) when in invite view
   useEffect(() => {
-    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    const h = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (editorTarget) setEditorTarget(null)
+        else onClose()
+      }
+    }
     window.addEventListener('keydown', h)
     return () => window.removeEventListener('keydown', h)
-  }, [onClose])
+  }, [onClose, editorTarget])
 
-  function selectRole(r: InviteRole) {
-    setRole(r)
-    setRows(ROLE_CHECKLISTS[r].map(item => ({ ...item, id: `${item.id}-${Date.now()}` })))
-  }
+  // Focus email on mount
+  useEffect(() => { emailRef.current?.focus() }, [])
 
-  function updateRow(id: string, patch: Partial<InviteChecklistItem>) {
-    setRows(rs => rs.map(r => r.id === id ? { ...r, ...patch } : r))
-  }
+  // Load org id + roles
+  const loadRoles = useCallback(async (currentOrgId: string) => {
+    const { data: rows } = await supabase
+      .from('job_roles')
+      .select('*')
+      .eq('org_id', currentOrgId)
+      .order('created_at', { ascending: true })
+    setRoles(rows ?? [])
+    setRolesLoading(false)
+  }, [supabase])
 
-  function removeRow(id: string) {
-    setRows(rs => rs.filter(r => r.id !== id))
-  }
-
-  function addRow() {
-    setRows(rs => [...rs, {
-      id: `inv-new-${Date.now()}`,
-      label: 'New item', system: 'ITSM', included: true, hasKnowledge: false,
-    }])
-  }
+  useEffect(() => {
+    let active = true
+    supabase.auth.getUser().then(({ data }) => {
+      if (!active || !data.user) { setRolesLoading(false); return }
+      const id = data.user.app_metadata?.org_id as string | undefined
+      if (!id) { setRolesLoading(false); return }
+      setOrgId(id)
+      loadRoles(id)
+    })
+    return () => { active = false }
+  }, [supabase, loadRoles])
 
   function handleSend() {
     if (!EMAIL_RE.test(email)) { setError('Enter a valid email address.'); return }
-    if (!role)                  { setError('Choose a role before sending.'); return }
-    onSent(email, role)
+    if (!jobRoleId)             { setError('Select a role before sending.'); return }
+    onSent(email, jobRoleId)
   }
+
+  function handleRoleSaved(newRole: JobRole) {
+    setEditorTarget(null)
+    // Refresh roles then auto-select the saved role
+    if (orgId) {
+      loadRoles(orgId).then(() => setJobRoleId(newRole.id))
+    }
+  }
+
+  function handleRoleDeleted(roleId: string) {
+    setEditorTarget(null)
+    setRoles(prev => prev.filter(r => r.id !== roleId))
+    if (jobRoleId === roleId) setJobRoleId(null)
+  }
+
+  const inEditor = editorTarget !== null
+  const effectiveOrgId = orgId ?? ''
 
   return (
     <div
@@ -245,105 +621,146 @@ function InviteDialog({ onClose, onSent }: InviteDialogProps) {
         zIndex: 100,
       }}
     >
-      {/* Scrim */}
+      {/* Scrim — only closes when in invite view */}
       <div
-        onClick={onClose}
+        onClick={inEditor ? undefined : onClose}
         style={{
           position: 'absolute', inset: 0,
           background: 'color-mix(in srgb, var(--color-ink) 25%, transparent)',
+          cursor: inEditor ? 'default' : 'pointer',
         }}
       />
-      {/* Dialog */}
+
+      {/* Dialog card */}
       <div
         className="animate-fade-up thin-scroll"
         style={{
           position: 'relative', zIndex: 1,
-          maxWidth: 580, width: '90vw',
+          maxWidth: 480, width: '90vw',
           maxHeight: '90vh', overflowY: 'auto',
           borderRadius: 24, background: 'var(--color-surface)',
           padding: 32, boxShadow: 'var(--shadow-float)',
           display: 'flex', flexDirection: 'column', gap: 20,
         }}
       >
-        <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>Invite a new starter</h2>
-        <p style={{ margin: 0, fontSize: 13, lineHeight: 1.6, color: 'var(--color-ink-muted)' }}>
-          They&rsquo;ll get an email with a link to set up their account and start onboarding.
-        </p>
-
-        {/* Email */}
-        <label style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 13 }}>
-          Email
-          <input
-            ref={emailRef}
-            type="email"
-            className="field"
-            value={email}
-            onChange={e => { setEmail(e.target.value); setError('') }}
-            placeholder="jamie.rivera@brightfield.com"
+        {/* ── Role editor view ── */}
+        {inEditor && (
+          <RoleEditor
+            role={editorTarget.role}
+            orgId={effectiveOrgId}
+            onSaved={handleRoleSaved}
+            onBack={() => setEditorTarget(null)}
+            onRoleDeleted={handleRoleDeleted}
           />
-        </label>
+        )}
 
-        {/* Role */}
-        <div>
-          <div style={{ fontSize: 13, marginBottom: 10, fontWeight: 500 }}>Role</div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-            {INVITE_ROLES.map(r => (
+        {/* ── Invite view ── */}
+        {!inEditor && (
+          <>
+            <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>Invite a new starter</h2>
+            <p style={{ margin: 0, fontSize: 13, lineHeight: 1.6, color: 'var(--color-ink-muted)' }}>
+              They&rsquo;ll receive an email with instructions to sign in.
+              Their onboarding tasks are set up automatically from the role you choose.
+            </p>
+
+            {/* Email */}
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 13 }}>
+              Email
+              <input
+                ref={emailRef}
+                type="email"
+                className="field"
+                value={email}
+                onChange={e => { setEmail(e.target.value); setError('') }}
+                placeholder="jamie.rivera@yourcompany.com"
+              />
+            </label>
+
+            {/* Role pills */}
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Role</div>
+              {rolesLoading ? (
+                <p style={{ fontSize: 13, color: 'var(--color-ink-muted)', margin: 0 }}>Loading…</p>
+              ) : (
+                <>
+                  {roles.length === 0 && (
+                    <p style={{ margin: '0 0 10px', fontSize: 13, color: 'var(--color-ink-muted)', lineHeight: 1.5 }}>
+                      No roles yet — create the first one with the&nbsp;
+                      <strong style={{ color: 'var(--color-ink)' }}>+</strong> button.
+                    </p>
+                  )}
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                    {roles.map(r => (
+                      <div key={r.id} style={{ position: 'relative', display: 'inline-flex' }}>
+                        <button
+                          type="button"
+                          onClick={() => { setJobRoleId(r.id); setError('') }}
+                          style={{
+                            paddingLeft: 16, paddingRight: 36,
+                            paddingTop: 8, paddingBottom: 8,
+                            borderRadius: 9999, border: 'none',
+                            cursor: 'pointer', fontSize: 13, fontWeight: 500,
+                            background: jobRoleId === r.id ? 'var(--color-violet)' : 'var(--color-sunk)',
+                            color:      jobRoleId === r.id ? '#fff' : 'var(--color-ink-muted)',
+                            transition: 'background 150ms, color 150ms',
+                            fontFamily: 'var(--font-sans)',
+                          }}
+                        >
+                          {r.name}
+                        </button>
+                        {/* Edit affordance — sits inside the pill on the right */}
+                        <button
+                          type="button"
+                          onClick={() => setEditorTarget({ role: r })}
+                          aria-label={`Edit ${r.name}`}
+                          style={{
+                            position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
+                            background: 'none', border: 'none', cursor: 'pointer', padding: 2,
+                            display: 'flex', alignItems: 'center',
+                            color: jobRoleId === r.id ? 'rgba(255,255,255,0.7)' : 'var(--color-ink-muted)',
+                          }}
+                        >
+                          <Pencil size={11} />
+                        </button>
+                      </div>
+                    ))}
+                    {/* + pill — always last */}
+                    <button
+                      type="button"
+                      onClick={() => setEditorTarget({ role: null })}
+                      aria-label="Create new role"
+                      style={{
+                        padding: '8px 14px', borderRadius: 9999, border: '1px dashed var(--color-border)',
+                        cursor: 'pointer', fontSize: 13, fontWeight: 600,
+                        background: 'transparent', color: 'var(--color-ink-muted)',
+                        fontFamily: 'var(--font-sans)',
+                      }}
+                    >
+                      <Plus size={13} />
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {error && (
+              <p style={{ margin: 0, fontSize: 12, color: 'var(--color-incorrect)' }}>{error}</p>
+            )}
+
+            {/* Footer */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
               <button
-                key={r} type="button"
-                onClick={() => selectRole(r)}
-                style={{
-                  padding: '8px 16px', borderRadius: 9999, border: 'none',
-                  cursor: 'pointer', fontSize: 13, fontWeight: 500,
-                  background: role === r ? 'var(--color-violet)'     : 'var(--color-sunk)',
-                  color:      role === r ? '#fff'                     : 'var(--color-ink-muted)',
-                  transition: 'background 150ms, color 150ms',
-                  fontFamily: 'var(--font-sans)',
-                }}
+                type="button"
+                className="btn-primary"
+                disabled={!jobRoleId}
+                onClick={handleSend}
               >
-                {r}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Checklist */}
-        {role && (
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-              <span style={{ fontSize: 13, fontWeight: 500 }}>Checklist</span>
-              <button type="button" className="btn-secondary" style={{ fontSize: 11, padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 4 }} onClick={addRow}>
-                <Plus size={12} /> Add item
+                Send invite
               </button>
             </div>
-            <div
-              className="thin-scroll"
-              style={{
-                maxHeight: 280, overflowY: 'auto',
-                display: 'flex', flexDirection: 'column', gap: 6,
-              }}
-            >
-              {rows.map(row => (
-                <InviteRow
-                  key={row.id}
-                  item={row}
-                  onChange={p => updateRow(row.id, p)}
-                  onRemove={() => removeRow(row.id)}
-                />
-              ))}
-            </div>
-          </div>
+          </>
         )}
-
-        {/* Error */}
-        {error && (
-          <p style={{ margin: 0, fontSize: 12, color: 'var(--color-incorrect)' }}>{error}</p>
-        )}
-
-        {/* Footer */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-          <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
-          <button type="button" className="btn-primary"   onClick={handleSend}>Send invite</button>
-        </div>
       </div>
     </div>
   )
@@ -352,12 +769,10 @@ function InviteDialog({ onClose, onSent }: InviteDialogProps) {
 // ─── Starter card ─────────────────────────────────────────────────────────────
 
 function StarterCard({ starter, onClick }: { starter: Starter; onClick: () => void }) {
-  const avg    = averageScore(starter)
-  const setup  = setupPct(starter)
-  const know   = knowledgePct(starter)
-  const done   = doneCount(starter)
-  const total  = starter.checklist.length
-  const ans    = answeredCount(starter)
+  const avg   = averageScore(starter)
+  const tasks = taskPct(starter)
+  const know  = knowledgePct(starter)
+  const ans   = answeredCount(starter)
   const totalQ = starter.quiz.length
 
   return (
@@ -378,21 +793,21 @@ function StarterCard({ starter, onClick }: { starter: Starter; onClick: () => vo
             {starter.name}
           </div>
           <div style={{ fontSize: 12, color: 'var(--color-ink-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {starter.jobTitle} &middot; {starter.team}
+            {starter.jobTitle ?? 'Not set'} &middot; {starter.team ?? 'Not set'}
           </div>
         </div>
       </div>
 
       {/* Bars */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <LabelledBar label="Setup"     pct={setup} color="var(--color-accent)" />
+        <LabelledBar label="Tasks"     pct={tasks} color="var(--color-accent)" />
         <LabelledBar label="Knowledge" pct={know}  color="var(--color-violet)" />
       </div>
 
       {/* Footer */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 20 }}>
         <span style={{ fontSize: 11, color: 'var(--color-ink-muted)', fontVariantNumeric: 'tabular-nums' }}>
-          {done}/{total} tasks &middot; {ans}/{totalQ} Qs
+          {starter.taskDone}/{starter.taskTotal} tasks &middot; {ans}/{totalQ} Qs
         </span>
         <ScoreLabel score={avg} />
       </div>
@@ -506,266 +921,11 @@ function KnowledgeTab({ starter }: { starter: Starter }) {
   )
 }
 
-// ─── Deadline label (shared rendering rule) ───────────────────────────────────
-
-function DeadlineLabel({ done, daysLeft }: { done: boolean; daysLeft: number }) {
-  if (done) {
-    return (
-      <span style={{
-        display: 'flex', alignItems: 'center', gap: 4,
-        fontSize: 11, fontWeight: 500,
-        color: 'var(--color-ink-muted)',
-        flexShrink: 0, whiteSpace: 'nowrap',
-      }}>
-        <Check size={11} strokeWidth={2.5} />
-        Done
-      </span>
-    )
-  }
-
-  let text: string
-  if (daysLeft < 0) {
-    const n = Math.abs(daysLeft)
-    text = `${n} ${n === 1 ? 'day' : 'days'} overdue`
-  } else if (daysLeft === 0) {
-    text = 'Due today'
-  } else if (daysLeft === 1) {
-    text = '1 day left'
-  } else {
-    text = `${daysLeft} days left`
-  }
-
-  const color =
-    daysLeft < 0  ? 'var(--color-incorrect)' :
-    daysLeft <= 2 ? 'var(--color-accent)'     :
-    daysLeft <= 7 ? 'var(--color-ink)'        :
-                    'var(--color-ink-muted)'
-
-  return (
-    <span style={{
-      fontSize: 11, fontWeight: 500, color,
-      flexShrink: 0, whiteSpace: 'nowrap',
-      fontVariantNumeric: 'tabular-nums',
-    }}>
-      {text}
-    </span>
-  )
-}
-
-// ─── Segmented programme bar ──────────────────────────────────────────────────
-
-function ProgrammeBar({ topics, onScrollTo }: { topics: ProgramTopic[]; onScrollTo: (id: number) => void }) {
-  const totalTasks = topics.reduce((s, t) => s + t.tasks.length, 0)
-  const doneTasks  = topics.reduce((s, t) => s + t.tasks.filter(x => x.done).length, 0)
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, width: '100%' }}>
-      {/* Meta header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <span style={{ fontSize: 13, fontWeight: 600 }}>
-          Onboarding programme
-        </span>
-        <span style={{ fontSize: 11, color: 'var(--color-ink-muted)' }}>
-          {topics.length} topics &middot; {totalTasks} tasks
-        </span>
-      </div>
-
-      {/* Segmented bar */}
-      <div style={{ display: 'flex', gap: 3, height: 20, borderRadius: 10, overflow: 'hidden' }}>
-        {topics.map(t => {
-          const state    = topicState(t.tasks)
-          const doneC    = t.tasks.filter(x => x.done).length
-          const label    = state === 'in-progress'
-            ? `${doneC} / ${t.tasks.length}`
-            : `${t.tasks.length}`
-          const bg =
-            state === 'complete'    ? 'var(--color-violet)'      :
-            state === 'in-progress' ? 'var(--color-accent)'      :
-                                      'var(--color-violet-soft)'
-          const fg =
-            state === 'complete'    ? '#fff'                     :
-            state === 'in-progress' ? '#fff'                     :
-                                      'var(--color-violet)'
-          return (
-            <button
-              key={t.id}
-              type="button"
-              title={t.title}
-              onClick={() => onScrollTo(t.id)}
-              style={{
-                flexGrow: t.tasks.length,
-                background: bg,
-                border: 'none',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: 10,
-                fontWeight: 600,
-                color: fg,
-                fontVariantNumeric: 'tabular-nums',
-                fontFamily: 'var(--font-sans)',
-                transition: 'filter 150ms',
-                padding: 0,
-                minWidth: 0,
-                overflow: 'hidden',
-              }}
-              onMouseEnter={e => (e.currentTarget as HTMLButtonElement).style.filter = 'brightness(0.92)'}
-              onMouseLeave={e => (e.currentTarget as HTMLButtonElement).style.filter = 'none'}
-            >
-              {label}
-            </button>
-          )
-        })}
-      </div>
-
-      {/* Footer row */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <span style={{ fontSize: 11, color: 'var(--color-ink-muted)', fontVariantNumeric: 'tabular-nums' }}>
-          {doneTasks} of {totalTasks} tasks done
-        </span>
-        <span style={{ fontSize: 11, color: 'var(--color-ink-muted)' }}>
-          Go at your own pace
-        </span>
-      </div>
-
-      {/* Legend */}
-      <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-        {(
-          [
-            ['complete',    'var(--color-violet)',      'Done'        ],
-            ['in-progress', 'var(--color-accent)',      'In progress' ],
-            ['not-started', 'var(--color-violet-soft)', 'Not started' ],
-          ] as const
-        ).map(([, color, label]) => (
-          <span key={label} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--color-ink-muted)' }}>
-            <span style={{ width: 8, height: 8, borderRadius: '50%', background: color, flexShrink: 0, display: 'inline-block' }} />
-            {label}
-          </span>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-// ─── Checklist tab ────────────────────────────────────────────────────────────
-
-function ChecklistTab({
-  starter: _starter,
-  containerStyle,
-}: {
-  starter: Starter
-  containerStyle: React.CSSProperties
-}) {
-  const topicRefs = useRef<Record<number, HTMLElement | null>>({})
-
-  function scrollToTopic(id: number) {
-    topicRefs.current[id]?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  }
-
-  return (
-    // Plain block — no overflow, no fixed height. The page is the scroll surface.
-    <div style={{ paddingTop: 8 }}>
-      <div style={{ ...containerStyle }}>
-
-          {/* Programme bar */}
-          <div className="card" style={{ padding: '24px 28px', marginBottom: 24 }}>
-            <ProgrammeBar topics={PROGRAMME} onScrollTo={scrollToTopic} />
-          </div>
-
-          {/* Topic list */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-            {PROGRAMME.map(topic => {
-              const state  = topicState(topic.tasks)
-              const doneC  = topic.tasks.filter(x => x.done).length
-              const headerBg =
-                state === 'complete'    ? 'var(--color-violet-soft)' :
-                state === 'in-progress' ? 'var(--color-accent-soft)' :
-                                          'var(--color-sunk)'
-              const headerColor =
-                state === 'complete'    ? 'var(--color-violet)' :
-                state === 'in-progress' ? 'var(--color-accent)' :
-                                          'var(--color-locked)'
-
-              return (
-                <section
-                  key={topic.id}
-                  ref={el => { topicRefs.current[topic.id] = el }}
-                  className="card"
-                  style={{ overflow: 'hidden', padding: 0 }}
-                >
-                  {/* Topic header */}
-                  <div style={{
-                    padding: '14px 20px',
-                    background: headerBg,
-                    display: 'flex', alignItems: 'center', gap: 10,
-                  }}>
-                    <span style={{ fontSize: 13, fontWeight: 600, flex: 1, color: headerColor }}>
-                      {topic.title}
-                    </span>
-                    {topic.evidence && (
-                      <span
-                        title="Completion recorded as compliance evidence"
-                        style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: headerColor, opacity: 0.8, cursor: 'help' }}
-                      >
-                        <Shield size={12} />
-                        Evidence
-                      </span>
-                    )}
-                    <span style={{ fontSize: 11, fontVariantNumeric: 'tabular-nums', color: headerColor, opacity: 0.8, flexShrink: 0 }}>
-                      {doneC}/{topic.tasks.length}
-                    </span>
-                  </div>
-
-                  {/* Task rows */}
-                  <div style={{ display: 'flex', flexDirection: 'column' }}>
-                    {topic.tasks.map((task, idx) => (
-                      <div
-                        key={idx}
-                        style={{
-                          display: 'flex', alignItems: 'center', gap: 14,
-                          padding: '13px 20px',
-                          borderTop: idx === 0 ? 'none' : '1px solid var(--color-border)',
-                        }}
-                      >
-                        {/* Tick or empty circle */}
-                        {task.done ? (
-                          <div style={{
-                            width: 22, height: 22, borderRadius: '50%', flexShrink: 0,
-                            background: state === 'complete' ? 'var(--color-violet)' : 'var(--color-accent)',
-                            display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          }}>
-                            <Check size={12} strokeWidth={3} color="#fff" />
-                          </div>
-                        ) : (
-                          <div style={{
-                            width: 22, height: 22, borderRadius: '50%', flexShrink: 0,
-                            border: '1.5px solid var(--color-border)',
-                            background: 'var(--color-surface)',
-                          }} />
-                        )}
-                        <span style={{
-                          fontSize: 13, fontWeight: 500, flex: 1,
-                          color: task.done ? 'var(--color-ink-muted)' : 'var(--color-ink)',
-                          textDecoration: task.done ? 'line-through' : 'none',
-                        }}>
-                          {task.name}
-                        </span>
-                        <DeadlineLabel done={task.done} daysLeft={task.daysLeft} />
-                      </div>
-                    ))}
-                  </div>
-                </section>
-              )
-            })}
-          </div>
-
-      </div>
-    </div>
-  )
-}
 
 // ─── Header stat tile ─────────────────────────────────────────────────────────
+// (DeadlineLabel, ProgrammeBar and ChecklistTab removed — progress is computed
+//  from real task rows; the 'Tasks' tab already surfaces them via InternTasksView)
+
 
 type StatTone = 'plain' | 'violet' | 'yellow' | 'correct' | 'incorrect'
 
@@ -794,15 +954,12 @@ function HeaderStat({ label, value, tone = 'plain' }: { label: string; value: st
 
 // ─── Detail view ─────────────────────────────────────────────────────────────
 
-function DetailView({ starter, onBack }: { starter: Starter; onBack: () => void }) {
-  const [tab, setTab] = useState<'checklist' | 'knowledge'>('checklist')
-  // Task-based progress from the shared programme — matches the bar below.
-  const taskDone  = programmeDoneTasks()
-  const taskTotal = programmeTotalTasks()
-  const checkPct  = programmeCompletionPct()
-  const avg    = averageScore(starter)
-  const ans    = answeredCount(starter)
-  const totalQ = starter.quiz.length
+function DetailView({ starter, onBack, orgId }: { starter: Starter; onBack: () => void; orgId: string }) {
+  const [tab, setTab] = useState<'tasks' | 'knowledge' | 'quizzes'>('tasks')
+  const pct      = taskPct(starter)
+  const avg      = averageScore(starter)
+  const ans      = answeredCount(starter)
+  const totalQ   = starter.quiz.length
 
   // Escape goes back
   useEffect(() => {
@@ -857,25 +1014,25 @@ function DetailView({ starter, onBack }: { starter: Starter; onBack: () => void 
             <div>
               <div style={{ fontSize: 20, fontWeight: 600 }}>{starter.name}</div>
               <div style={{ fontSize: 13, color: 'var(--color-ink-muted)', marginTop: 4 }}>
-                {starter.jobTitle} &middot; {starter.team}
+                {starter.jobTitle ?? 'Not set'} &middot; {starter.team ?? 'Not set'}
               </div>
               <div style={{ fontSize: 11, color: 'var(--color-ink-muted)', marginTop: 4 }}>
-                Started {starter.startDate}
+                {starter.startDate ? <>Started {starter.startDate}</> : 'Start date not set'}
               </div>
             </div>
           </div>
 
-          {/* Stats row — all derived from the shared programme data */}
+          {/* Stats row — derived from real task counts */}
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'flex-start' }}>
-            <HeaderStat label="Checklist" value={`${checkPct}%`}            tone="violet" />
-            <HeaderStat label="Tasks"     value={`${taskDone}/${taskTotal}`} tone="plain"  />
-            <HeaderStat label="Answered"  value={`${ans}/${totalQ}`}         tone="yellow" />
-            <HeaderStat label="Average"   value={avgDisplay}                 tone={avgTone} />
+            <HeaderStat label="Tasks"    value={`${starter.taskDone}/${starter.taskTotal}`} tone="violet" />
+            <HeaderStat label="Progress" value={`${pct}%`}                                  tone="plain"  />
+            <HeaderStat label="Answered" value={`${ans}/${totalQ}`}                         tone="yellow" />
+            <HeaderStat label="Average"  value={avgDisplay}                                 tone={avgTone} />
           </div>
 
-          {/* Progress track — matches the Checklist stat above */}
+          {/* Progress track from real task counts */}
           <div className="track" style={{ width: '100%', height: 6, marginTop: 4 }}>
-            <div className="track-fill" style={{ width: `${checkPct}%`, height: '100%' }} />
+            <div className="track-fill" style={{ width: `${pct}%`, height: '100%' }} />
           </div>
         </div>
       </div>
@@ -883,7 +1040,7 @@ function DetailView({ starter, onBack }: { starter: Starter; onBack: () => void 
       {/* Tab strip */}
       <div style={{ ...W, paddingBottom: 16 }}>
         <div style={{ display: 'flex', gap: 4 }}>
-          {(['checklist', 'knowledge'] as const).map(t => (
+          {(['tasks', 'knowledge', 'quizzes'] as const).map(t => (
             <button
               key={t} type="button"
               onClick={() => setTab(t)}
@@ -902,18 +1059,23 @@ function DetailView({ starter, onBack }: { starter: Starter; onBack: () => void 
         </div>
       </div>
 
-      {/* Tab body — keyed by starter so switching people remounts.
-          Checklist renders as plain block flow (page scrolls).
-          Knowledge keeps its own internal two-pane layout. */}
+      {/* Tab body — keyed by starter so switching people remounts. */}
       <div key={starter.id}>
-        {tab === 'checklist'
-          ? <ChecklistTab starter={starter} containerStyle={W} />
-          : (
-            <div style={{ height: 'calc(100vh - 280px)', display: 'flex', overflow: 'hidden' }}>
-              <KnowledgeTab starter={starter} />
-            </div>
-          )
-        }
+        {tab === 'tasks' && (
+          <div style={{ ...W }}>
+            <InternTasksView profileId={starter.id} />
+          </div>
+        )}
+        {tab === 'knowledge' && (
+          <div style={{ height: 'calc(100vh - 280px)', display: 'flex', overflow: 'hidden' }}>
+            <KnowledgeTab starter={starter} />
+          </div>
+        )}
+        {tab === 'quizzes' && (
+          <div style={{ ...W }}>
+            <AssignmentPanel profileId={starter.id} />
+          </div>
+        )}
       </div>
     </div>
   )
@@ -924,28 +1086,38 @@ function DetailView({ starter, onBack }: { starter: Starter; onBack: () => void 
 interface SupervisorPageProps {
   name:    string
   company: string
+  orgId:   string
+  /** Real roster from the DB; empty array when no interns yet. */
+  roster:  Starter[]
+  /** Called when the supervisor submits an invite; returns an error string or null. */
+  onInvite: (email: string, jobRoleId: string) => Promise<string | null>
 }
 
-export default function SupervisorPage({ name, company }: SupervisorPageProps) {
+export default function SupervisorPage({ name, company, orgId, roster, onInvite }: SupervisorPageProps) {
   const [search,    setSearch]    = useState('')
   const [selected,  setSelected]  = useState<Starter | null>(null)
   const [invite,    setInvite]    = useState(false)
   const [confirm,   setConfirm]   = useState('')
 
-  const filtered = ROSTER.filter(s =>
+  const filtered = roster.filter(s =>
     s.name.toLowerCase().includes(search.toLowerCase())
   )
 
-  function handleSent(email: string, role: InviteRole) {
+  async function handleSent(email: string, jobRoleId: string) {
+    const err = await onInvite(email, jobRoleId)
     setInvite(false)
-    setConfirm(`Invitation sent to ${email} as ${role}`)
-    setTimeout(() => setConfirm(''), 4000)
+    if (err) {
+      setConfirm(`Error: ${err}`)
+    } else {
+      setConfirm(`Invitation sent to ${email}`)
+    }
+    setTimeout(() => setConfirm(''), 5000)
   }
 
   if (selected) {
     return (
       <div className="thin-scroll" style={{ flex: 1, overflowY: 'auto' }}>
-        <DetailView starter={selected} onBack={() => setSelected(null)} />
+        <DetailView starter={selected} orgId={orgId} onBack={() => setSelected(null)} />
       </div>
     )
   }
@@ -965,7 +1137,9 @@ export default function SupervisorPage({ name, company }: SupervisorPageProps) {
               {name} &middot; {company || 'Brightfield'}
             </span>
             <h1 style={{ margin: 0, fontSize: 24, fontWeight: 600, letterSpacing: '-0.01em', color: 'var(--color-ink)' }}>
-              Onboarding, {ROSTER.length} {ROSTER.length === 1 ? 'new starter' : 'new starters'}
+              {roster.length === 0
+                ? 'No new starters yet'
+                : `Onboarding, ${roster.length} ${roster.length === 1 ? 'new starter' : 'new starters'}`}
             </h1>
           </div>
           {/* Search */}
@@ -988,7 +1162,9 @@ export default function SupervisorPage({ name, company }: SupervisorPageProps) {
         {/* Grid */}
         {filtered.length === 0 ? (
           <p style={{ fontSize: 13, color: 'var(--color-ink-muted)', textAlign: 'center', padding: '48px 0' }}>
-            No new starters match &ldquo;{search}&rdquo;.
+            {search
+              ? <>No new starters match &ldquo;{search}&rdquo;.</>
+              : 'No new starters have been added yet. Use the button below to send your first invite.'}
           </p>
         ) : (
           <div
@@ -1017,7 +1193,10 @@ export default function SupervisorPage({ name, company }: SupervisorPageProps) {
 
       {/* Invite dialog */}
       {invite && (
-        <InviteDialog onClose={() => setInvite(false)} onSent={handleSent} />
+        <InviteDialog
+          onClose={() => setInvite(false)}
+          onSent={handleSent}
+        />
       )}
 
       {/* Confirmation toast */}

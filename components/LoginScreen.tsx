@@ -1,8 +1,8 @@
 /**
  * components/LoginScreen.tsx
- * Sign-in screen — a themed front door, not real authentication.
- * No backend. Whatever is entered gates entry into one hardcoded demo profile,
- * personalised from the submitted address.
+ * Two-step OTP sign-in: email → 6-digit code.
+ * Invite-only: only provisioned accounts receive a code.
+ * Role is read from the account after sign-in, never chosen here.
  */
 'use client'
 
@@ -15,32 +15,20 @@ import {
   useEffect,
   useRef,
   useState,
+  useTransition,
 } from 'react'
-import type { Profile, Role } from '@/lib/types'
-import { PRIYA_PROFILE, personalise } from '@/lib/data'
 import { Lockup } from '@/components/Wordmark'
 import { TRACED_ACCENT, TRACED_SURFACE, TRACED_INK, TRACED_HIGHLIGHT } from '@/components/tracedIllustration'
+import { sendOtp, verifyOtp } from '@/lib/auth-actions'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const CODE_LENGTH    = 6
-const RESEND_DURATION = 2600
+const CODE_LENGTH     = 6
+const RESEND_COOLDOWN = 30_000 // 30 s
 
-// ─── Email helpers ────────────────────────────────────────────────────────────
+// ─── Email validation ─────────────────────────────────────────────────────────
 
 const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-
-function deriveIdentity(email: string): { name: string; company: string } {
-  const [local, domain] = email.split('@')
-  const name = (local ?? '')
-    .split(/[._+\-]+/)
-    .map(w => w.replace(/\d+/g, ''))
-    .filter(Boolean)
-    .map(w => w.charAt(0).toUpperCase() + w.slice(1))
-    .join(' ')
-  const company = (domain ?? '').split('.')[0] ?? ''
-  return { name, company }
-}
 
 // ─── Sparkle star helper ──────────────────────────────────────────────────────
 
@@ -55,25 +43,22 @@ function Sparkle({ x, y, size, color }: { x: number; y: number; size: number; co
   )
 }
 
-// ─── Props ────────────────────────────────────────────────────────────────────
-
-interface LoginScreenProps {
-  onStart: (profile: Profile, role: Role, company: string) => void
-}
-
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function LoginScreen({ onStart }: LoginScreenProps) {
-  const [step,         setStep]         = useState<'email' | 'code'>('email')
-  const [email,        setEmail]        = useState('')
-  const [emailError,   setEmailError]   = useState('')
-  const [code,         setCode]         = useState<string[]>(Array(CODE_LENGTH).fill(''))
-  const [resendShown,  setResendShown]  = useState(false)
-  const [supervisor,   setSupervisor]   = useState(false)
+export default function LoginScreen() {
+  const [step,        setStep]        = useState<'email' | 'code'>('email')
+  const [email,       setEmail]       = useState('')
+  const [emailError,  setEmailError]  = useState('')
+  const [code,        setCode]        = useState<string[]>(Array(CODE_LENGTH).fill(''))
+  const [codeError,   setCodeError]   = useState('')
+  const [resendAt,    setResendAt]    = useState<number | null>(null)
+  const [resendLabel, setResendLabel] = useState('')
 
-  const emailRef  = useRef<HTMLInputElement>(null)
-  const codeRefs  = useRef<(HTMLInputElement | null)[]>([])
-  const stepHeightRef = useRef<number | undefined>(undefined)
+  const [isPendingSend,   startSend]   = useTransition()
+  const [isPendingVerify, startVerify] = useTransition()
+
+  const emailRef      = useRef<HTMLInputElement>(null)
+  const codeRefs      = useRef<(HTMLInputElement | null)[]>([])
   const activeStepRef = useRef<HTMLDivElement>(null)
   const [stackHeight, setStackHeight] = useState<number | undefined>(undefined)
 
@@ -102,6 +87,24 @@ export default function LoginScreen({ onStart }: LoginScreenProps) {
     return () => cancelAnimationFrame(frame)
   }, [step])
 
+  // ── Resend cooldown ticker ────────────────────────────────────────────────
+
+  useEffect(() => {
+    if (resendAt === null) return
+    const tick = () => {
+      const remaining = Math.ceil((resendAt - Date.now()) / 1000)
+      if (remaining <= 0) {
+        setResendLabel('')
+        setResendAt(null)
+      } else {
+        setResendLabel(`Resend in ${remaining}s`)
+      }
+    }
+    tick()
+    const id = setInterval(tick, 1000)
+    return () => clearInterval(id)
+  }, [resendAt])
+
   // ── Code fill helper ──────────────────────────────────────────────────────
 
   const fillCode = useCallback((chars: string, fromIndex: number) => {
@@ -127,25 +130,41 @@ export default function LoginScreen({ onStart }: LoginScreenProps) {
       return
     }
     setEmailError('')
-    setStep('code')
+    startSend(async () => {
+      await sendOtp(email)
+      // Always advance — never reveal whether the address is registered.
+      setStep('code')
+      setResendAt(Date.now() + RESEND_COOLDOWN)
+    })
   }, [email])
 
   // ── Verify ────────────────────────────────────────────────────────────────
 
   const handleVerify = useCallback((e: FormEvent) => {
     e.preventDefault()
-    const { name, company } = deriveIdentity(email)
-    const role: Role = supervisor ? 'supervisor' : 'new-starter'
-    const profile    = personalise(PRIYA_PROFILE, name, company)
-    onStart(profile, role, company)
-  }, [email, supervisor, onStart])
+    const token = code.join('')
+    setCodeError('')
+    startVerify(async () => {
+      const result = await verifyOtp(email, token)
+      if (result?.error) {
+        setCodeError(result.error)
+        setCode(Array(CODE_LENGTH).fill(''))
+        requestAnimationFrame(() => codeRefs.current[0]?.focus())
+      }
+      // On success, verifyOtp does a server-side redirect — nothing more to do.
+    })
+  }, [email, code])
 
   // ── Resend ────────────────────────────────────────────────────────────────
 
   const handleResend = useCallback(() => {
-    setResendShown(true)
-    setTimeout(() => setResendShown(false), RESEND_DURATION)
-  }, [])
+    if (resendAt !== null && Date.now() < resendAt) return
+    startSend(async () => {
+      await sendOtp(email)
+      setCode(Array(CODE_LENGTH).fill(''))
+      setResendAt(Date.now() + RESEND_COOLDOWN)
+    })
+  }, [email, resendAt])
 
   // ── Code box handlers ─────────────────────────────────────────────────────
 
@@ -185,6 +204,7 @@ export default function LoginScreen({ onStart }: LoginScreenProps) {
 
   const codeComplete = code.every(c => c.length === 1)
   const emailStep    = step === 'email'
+  const isBusy       = isPendingSend || isPendingVerify
 
   return (
     <main
@@ -243,12 +263,9 @@ export default function LoginScreen({ onStart }: LoginScreenProps) {
             gap: 0,
           }}
         >
-          {/* Lockup + demo label */}
+          {/* Lockup */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 32 }}>
             <Lockup size="large" layout="stacked" />
-            <span className="section-label" style={{ alignSelf: 'flex-end', marginBottom: 2 }}>
-              demo build
-            </span>
           </div>
 
           {/* Headline */}
@@ -284,10 +301,8 @@ export default function LoginScreen({ onStart }: LoginScreenProps) {
 
           {/* Sign-in card */}
           {/*
-            noValidate is required here. Without it, the browser's own constraint
-            validation on the email input swallows the submit event before our
-            handler runs, so the styled inline error never appears and the form
-            silently does nothing. Our check is the only one.
+            noValidate: browser constraint validation swallows submit before our
+            handler runs, so we do our own check and show a styled inline error.
           */}
           <form
             noValidate
@@ -304,7 +319,7 @@ export default function LoginScreen({ onStart }: LoginScreenProps) {
               gap: 0,
             }}
           >
-            {/* ── Step wrapper ── */}
+            {/* ── Step wrapper (animated height) ── */}
             <div
               className="signin-stack"
               style={{ height: stackHeight !== undefined ? stackHeight : undefined }}
@@ -344,60 +359,28 @@ export default function LoginScreen({ onStart }: LoginScreenProps) {
                       placeholder="you@company.com"
                       value={email}
                       onChange={e => { setEmail(e.target.value); setEmailError('') }}
+                      disabled={isBusy}
                     />
                   </label>
 
                   {emailError && (
-                    <p
-                      style={{
-                        margin: 0,
-                        fontSize: 12,
-                        color: 'var(--color-incorrect)',
-                        lineHeight: 1.4,
-                      }}
-                    >
+                    <p style={{ margin: 0, fontSize: 12, color: 'var(--color-incorrect)', lineHeight: 1.4 }}>
                       {emailError}
                     </p>
                   )}
 
-                  {/* Supervisor checkbox */}
-                  <label
-                    style={{
-                      display: 'flex',
-                      alignItems: 'flex-start',
-                      gap: 10,
-                      cursor: 'pointer',
-                    }}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={supervisor}
-                      onChange={e => setSupervisor(e.target.checked)}
-                      style={{ accentColor: 'var(--color-accent)', marginTop: 2, flexShrink: 0 }}
-                    />
-                    <span
-                      style={{
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: 2,
-                        fontSize: 13,
-                        color: 'var(--color-ink)',
-                      }}
-                    >
-                      Sign in as a supervisor
-                      <span style={{ fontSize: 11, color: 'var(--color-ink-muted)' }}>
-                        Supervisors see the training side only.
-                      </span>
-                    </span>
-                  </label>
-
                   <button
                     type="submit"
                     className="btn-primary"
+                    disabled={isBusy}
                     style={{ width: '100%', paddingTop: 12, paddingBottom: 12 }}
                   >
-                    Send code
+                    {isPendingSend ? 'Sending…' : 'Send code'}
                   </button>
+
+                  <p style={{ margin: 0, fontSize: 11, color: 'var(--color-ink-muted)', lineHeight: 1.5, textAlign: 'center' }}>
+                    If this address is registered, a code is on its way.
+                  </p>
                 </div>
               </div>
 
@@ -415,7 +398,11 @@ export default function LoginScreen({ onStart }: LoginScreenProps) {
                       type="button"
                       className="btn-secondary"
                       style={{ padding: '4px 12px', fontSize: 11 }}
-                      onClick={() => setStep('email')}
+                      onClick={() => {
+                        setStep('email')
+                        setCode(Array(CODE_LENGTH).fill(''))
+                        setCodeError('')
+                      }}
                     >
                       Change
                     </button>
@@ -423,7 +410,7 @@ export default function LoginScreen({ onStart }: LoginScreenProps) {
 
                   {/* Email line */}
                   <p style={{ margin: 0, fontSize: 13, color: 'var(--color-ink-muted)', lineHeight: 1.5 }}>
-                    We sent a code to{' '}
+                    We sent a 6-digit code to{' '}
                     <span style={{ color: 'var(--color-ink)', fontWeight: 500 }}>{email}</span>
                   </p>
 
@@ -453,17 +440,24 @@ export default function LoginScreen({ onStart }: LoginScreenProps) {
                         onKeyDown={e => handleCodeKeyDown(i, e)}
                         onPaste={e => handleCodePaste(i, e)}
                         onFocus={handleCodeFocus}
+                        disabled={isBusy}
                       />
                     ))}
                   </div>
 
+                  {codeError && (
+                    <p style={{ margin: 0, fontSize: 12, color: 'var(--color-incorrect)', lineHeight: 1.4 }}>
+                      {codeError}
+                    </p>
+                  )}
+
                   <button
                     type="submit"
                     className="btn-primary"
-                    disabled={!codeComplete}
+                    disabled={!codeComplete || isBusy}
                     style={{ width: '100%', paddingTop: 12, paddingBottom: 12 }}
                   >
-                    Verify and continue
+                    {isPendingVerify ? 'Verifying…' : 'Verify and continue'}
                   </button>
 
                   {/* Resend live region */}
@@ -476,14 +470,15 @@ export default function LoginScreen({ onStart }: LoginScreenProps) {
                       justifyContent: 'center',
                     }}
                   >
-                    {resendShown ? (
+                    {resendLabel ? (
                       <span style={{ fontSize: 12, color: 'var(--color-ink-muted)' }}>
-                        A new code is on its way.
+                        {resendLabel}
                       </span>
                     ) : (
                       <button
                         type="button"
                         onClick={handleResend}
+                        disabled={isBusy}
                         style={{
                           background: 'none',
                           border: 'none',
@@ -530,29 +525,9 @@ export default function LoginScreen({ onStart }: LoginScreenProps) {
                 userSelect:    'none',
               }}
             >
-              {/* Three diagonal strokes */}
-              <path
-                d="M-20,520 C80,400 220,280 400,60"
-                fill="none"
-                stroke="var(--color-border)"
-                strokeWidth={1.5}
-                strokeLinecap="round"
-              />
-              <path
-                d="M580,80 C480,200 340,320 160,540"
-                fill="none"
-                stroke="var(--color-border)"
-                strokeWidth={1.5}
-                strokeLinecap="round"
-              />
-              <path
-                d="M-20,300 C100,240 200,200 380,220 C460,228 540,260 620,300"
-                fill="none"
-                stroke="var(--color-border)"
-                strokeWidth={1.5}
-                strokeLinecap="round"
-              />
-              {/* Sparkles */}
+              <path d="M-20,520 C80,400 220,280 400,60" fill="none" stroke="var(--color-border)" strokeWidth={1.5} strokeLinecap="round" />
+              <path d="M580,80 C480,200 340,320 160,540" fill="none" stroke="var(--color-border)" strokeWidth={1.5} strokeLinecap="round" />
+              <path d="M-20,300 C100,240 200,200 380,220 C460,228 540,260 620,300" fill="none" stroke="var(--color-border)" strokeWidth={1.5} strokeLinecap="round" />
               <Sparkle x={40}  y={70}  size={7}   color="var(--color-yellow)" />
               <Sparkle x={520} y={60}  size={5}   color="var(--color-accent-soft)" />
               <Sparkle x={30}  y={430} size={6}   color="var(--color-accent-soft)" />
@@ -568,11 +543,8 @@ export default function LoginScreen({ onStart }: LoginScreenProps) {
               aria-hidden="true"
               focusable="false"
               style={{
-                display:    'block',
-                width:      '100%',
-                height:     'auto',
-                userSelect: 'none',
-                position:   'relative',
+                display: 'block', width: '100%', height: 'auto',
+                userSelect: 'none', position: 'relative',
               }}
             >
               <g transform="translate(0,1024) scale(0.1,-0.1)">
@@ -586,7 +558,7 @@ export default function LoginScreen({ onStart }: LoginScreenProps) {
         </div>
       </div>
 
-      {/* Code box inline styles (can't use @apply inside a style attr) */}
+      {/* Code box inline styles */}
       <style>{`
         .code-box {
           height: 56px;
@@ -604,6 +576,9 @@ export default function LoginScreen({ onStart }: LoginScreenProps) {
         .code-box:focus {
           border-color: var(--color-accent);
           box-shadow: 0 0 0 4px var(--color-accent-soft);
+        }
+        .code-box:disabled {
+          opacity: 0.5;
         }
       `}</style>
     </main>
