@@ -8,7 +8,11 @@
  * id that illustrates it. We resolve those ids to real image URLs and return
  * { steps: [{ text, image? }] }.
  *
- * The OpenAI key lives in .env (OPENAI_API_KEY) and is read on the server only.
+ * Uses watsonx.ai inference API. Required .env vars:
+ *   WATSONX_API_KEY   — IBM Cloud API key
+ *   WATSONX_PROJECT_ID — watsonx project ID
+ *   WATSONX_URL        — regional base URL, e.g. https://eu-gb.ml.cloud.ibm.com
+ *   WATSONX_MODEL      — optional, defaults to ibm/granite-3-3-8b-instruct
  */
 import { NextResponse } from 'next/server'
 import { readFileSync, readdirSync, existsSync } from 'fs'
@@ -123,6 +127,10 @@ function buildSystemPrompt(topics: Topic[], persona: PersonaContext = {}): strin
     'same screenshot on multiple steps. Keep each step to one or two sentences and',
     'do not use markdown headings or bullet symbols.',
     '',
+    'You MUST respond with ONLY a raw JSON object — no markdown, no code fences,',
+    'no explanation, no text before or after. The JSON must have this exact shape:',
+    '{"steps":[{"text":"...","imageId":"...or null"},...]}',
+    '',
     `Person you are helping: ${personaLine(persona)}.`,
     '',
     '===== REFERENCE GUIDES =====',
@@ -135,36 +143,42 @@ function buildSystemPrompt(topics: Topic[], persona: PersonaContext = {}): strin
   ].join('\n')
 }
 
-// Structured-output schema: the model MUST return this shape.
-const RESPONSE_SCHEMA = {
-  type: 'object',
-  additionalProperties: false,
-  required: ['steps'],
-  properties: {
-    steps: {
-      type: 'array',
-      items: {
-        type: 'object',
-        additionalProperties: false,
-        required: ['text', 'imageId'],
-        properties: {
-          text:    { type: 'string' },
-          imageId: { type: ['string', 'null'] },
-        },
-      },
-    },
-  },
-} as const
+const IAM_TOKEN_URL = 'https://iam.cloud.ibm.com/identity/token'
 
-const OPENAI_URL = 'https://api.openai.com/v1/chat/completions'
+// Exchange an IBM Cloud API key for a short-lived IAM bearer token.
+async function getIamToken(apiKey: string): Promise<string> {
+  const res = await fetch(IAM_TOKEN_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'urn:ibm:params:oauth:grant-type:apikey',
+      apikey:     apiKey,
+    }),
+  })
+  if (!res.ok) {
+    const detail = await res.text()
+    throw new Error(`IAM token exchange failed (${res.status}): ${detail}`)
+  }
+  const data = await res.json()
+  return data.access_token as string
+}
 
 // ─── Handler ──────────────────────────────────────────────────────────────────
 
 export async function POST(req: Request) {
-  const apiKey = process.env.OPENAI_API_KEY?.trim()
+  const apiKey    = process.env.WATSONX_API_KEY?.trim()
+  const projectId = process.env.WATSONX_PROJECT_ID?.trim()
+  const baseUrl   = process.env.WATSONX_URL?.trim() || 'https://eu-gb.ml.cloud.ibm.com'
+
   if (!apiKey) {
     return NextResponse.json(
-      { error: 'OPENAI_API_KEY is not set. Paste your key into .env and restart the dev server.' },
+      { error: 'WATSONX_API_KEY is not set. Paste your key into .env and restart the dev server.' },
+      { status: 500 },
+    )
+  }
+  if (!projectId) {
+    return NextResponse.json(
+      { error: 'WATSONX_PROJECT_ID is not set. Paste your project ID into .env and restart the dev server.' },
       { status: 500 },
     )
   }
@@ -194,25 +208,36 @@ export async function POST(req: Request) {
     }
   }
 
-  const model = process.env.OPENAI_MODEL?.trim() || 'gpt-4o-mini'
+  const model  = process.env.WATSONX_MODEL?.trim() || 'meta-llama/llama-3-3-70b-instruct'
+  const wxUrl  = `${baseUrl}/ml/v1/text/chat?version=2024-05-13`
+
+  let iamToken: string
+  try {
+    iamToken = await getIamToken(apiKey)
+  } catch (err) {
+    return NextResponse.json(
+      { error: 'Failed to obtain IAM token.', detail: String(err) },
+      { status: 502 },
+    )
+  }
 
   try {
-    const res = await fetch(OPENAI_URL, {
+    const res = await fetch(wxUrl, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
-        Authorization:  `Bearer ${apiKey}`,
+        'Content-Type':  'application/json',
+        'Authorization': `Bearer ${iamToken}`,
       },
       body: JSON.stringify({
-        model,
-        temperature: 0.3,
+        model_id:   model,
+        project_id: projectId,
         messages: [
           { role: 'system', content: buildSystemPrompt(topics, body.persona) },
           { role: 'user',   content: query },
         ],
-        response_format: {
-          type: 'json_schema',
-          json_schema: { name: 'guide_answer', strict: true, schema: RESPONSE_SCHEMA },
+        parameters: {
+          temperature: 0.3,
+          response_format: { type: 'json_object' },
         },
       }),
     })
@@ -220,7 +245,7 @@ export async function POST(req: Request) {
     if (!res.ok) {
       const detail = await res.text()
       return NextResponse.json(
-        { error: `OpenAI request failed (${res.status}).`, detail },
+        { error: `watsonx API request failed (${res.status}).`, detail },
         { status: 502 },
       )
     }
@@ -228,10 +253,13 @@ export async function POST(req: Request) {
     const data = await res.json()
     const content: string | undefined = data?.choices?.[0]?.message?.content
     if (!content) {
-      return NextResponse.json({ error: 'OpenAI returned no answer.' }, { status: 502 })
+      return NextResponse.json({ error: 'watsonx API returned no answer.' }, { status: 502 })
     }
 
-    const parsed = JSON.parse(content) as { steps?: { text: string; imageId: string | null }[] }
+    // Extract JSON from the response — the model may wrap it in markdown code fences
+    const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/)
+    const jsonStr = jsonMatch ? jsonMatch[1].trim() : content.trim()
+    const parsed = JSON.parse(jsonStr) as { steps?: { text: string; imageId: string | null }[] }
     const rawSteps = Array.isArray(parsed.steps) ? parsed.steps : []
 
     // Resolve image ids -> URLs; drop unknown ids and de-duplicate images so the
@@ -249,13 +277,13 @@ export async function POST(req: Request) {
       })
 
     if (steps.length === 0) {
-      return NextResponse.json({ error: 'OpenAI returned an empty answer.' }, { status: 502 })
+      return NextResponse.json({ error: 'watsonx API returned an empty answer.' }, { status: 502 })
     }
 
     return NextResponse.json({ steps })
   } catch (err) {
     return NextResponse.json(
-      { error: 'Could not reach OpenAI.', detail: String(err) },
+      { error: 'Could not reach watsonx API.', detail: String(err) },
       { status: 502 },
     )
   }
