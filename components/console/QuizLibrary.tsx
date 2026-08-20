@@ -300,7 +300,7 @@ function QuestionRow({
 
 // ─── Quiz editor ──────────────────────────────────────────────────────────────
 
-interface QuizEditorProps {
+export interface QuizEditorProps {
   quiz:      Quiz
   orgId:     string
   onBack:    () => void
@@ -308,7 +308,7 @@ interface QuizEditorProps {
   onDeleted: () => void
 }
 
-function QuizEditor({ quiz, onBack, onSaved, onDeleted }: QuizEditorProps) {
+export function QuizEditor({ quiz, onBack, onSaved, onDeleted }: QuizEditorProps) {
   const supabase = createClient()
 
   const [name,        setName]        = useState(quiz.name)

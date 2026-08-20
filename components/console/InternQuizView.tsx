@@ -25,11 +25,15 @@ interface AssignedQuiz {
   status:       string
   assigned_at:  string
   completed_at: string | null
+  // PostgREST returns null when the intern has no SELECT policy on quizzes.
+  // The RLS policy is now in place, but we keep this nullable so that any
+  // row that arrives with a null join (e.g. from a race or policy gap) is
+  // filtered out rather than crashing.
   quiz: {
-    id:   string
-    name: string
+    id:          string
+    name:        string
     description: string
-  }
+  } | null
 }
 
 interface QuestionRow {
@@ -109,11 +113,16 @@ function ProgressDots({
 
 // ─── Detail view (answering one quiz) ─────────────────────────────────────────
 
+// QuizDetail only receives assignments that passed the null-quiz filter in load(),
+// so quiz is guaranteed non-null here.  The prop type encodes that fact so the
+// compiler can verify all five access sites without non-null assertions.
+type AssignedQuizWithQuiz = AssignedQuiz & { quiz: NonNullable<AssignedQuiz['quiz']> }
+
 function QuizDetail({
   assignment,
   onBack,
 }: {
-  assignment: AssignedQuiz
+  assignment: AssignedQuizWithQuiz
   onBack:     () => void
 }) {
   const supabase = createClient()
@@ -432,8 +441,8 @@ function QuizList({
   assignments,
   onSelect,
 }: {
-  assignments: AssignedQuiz[]
-  onSelect:    (a: AssignedQuiz) => void
+  assignments: AssignedQuizWithQuiz[]
+  onSelect:    (a: AssignedQuizWithQuiz) => void
 }) {
   if (assignments.length === 0) {
     return (
@@ -498,10 +507,10 @@ function QuizList({
 export default function InternQuizView() {
   const supabase = createClient()
 
-  const [assignments, setAssignments] = useState<AssignedQuiz[]>([])
+  const [assignments, setAssignments] = useState<AssignedQuizWithQuiz[]>([])
   const [loading,     setLoading]     = useState(true)
   const [error,       setError]       = useState<string | null>(null)
-  const [selected,    setSelected]    = useState<AssignedQuiz | null>(null)
+  const [selected,    setSelected]    = useState<AssignedQuizWithQuiz | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -512,7 +521,10 @@ export default function InternQuizView() {
       .order('assigned_at', { ascending: true }) as unknown as
       Promise<{ data: AssignedQuiz[] | null; error: { message: string } | null }>)
     if (e) { setError(e.message); setLoading(false); return }
-    setAssignments(data ?? [])
+    // Drop any row where the quiz join came back null — this would only happen
+    // if the RLS policy is missing or the quiz was deleted after assignment.
+    // Either way there is nothing to render for that row.
+    setAssignments((data ?? []).filter((a): a is AssignedQuizWithQuiz => a.quiz !== null))
     setLoading(false)
   }, [supabase])
 

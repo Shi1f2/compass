@@ -24,7 +24,6 @@ import SupervisorPage from './SupervisorPage'
 import SupervisorProfilePage from './SupervisorProfilePage'
 import ReportPanel, { type ExportConfig } from './ReportPanel'
 import PdfPreview from '../pdf/PdfPreview'
-import QuizLibrary from './QuizLibrary'
 import InternQuizView from './InternQuizView'
 
 // ─── Mode type ────────────────────────────────────────────────────────────────
@@ -157,7 +156,6 @@ export default function ConsoleShell({
   const tabs: { id: Mode; label: string }[] = isSupervisor
     ? [
         { id: 'supervisor', label: 'Supervisor' },
-        { id: 'quizzes',    label: 'Quizzes'    },
         { id: 'profile',    label: persona.name },
       ]
     : [
@@ -326,9 +324,6 @@ export default function ConsoleShell({
   function Body() {
     if (mode === 'tasks') {
       return <InternTasks />
-    }
-    if (mode === 'quizzes' && isSupervisor) {
-      return <QuizLibrary orgId={orgId} />
     }
     if (mode === 'quizzes' && !isSupervisor) {
       return (

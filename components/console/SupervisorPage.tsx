@@ -5,7 +5,7 @@
 'use client'
 
 import React, {
-  useCallback, useEffect, useReducer, useRef, useState,
+  useCallback, useEffect, useRef, useState,
 } from 'react'
 import {
   ArrowLeft, Check, GraduationCap,
@@ -28,10 +28,6 @@ import {
   renameTaskTemplate,
   deleteTaskTemplate,
 } from '@/lib/settings-actions'
-import { groupByDay, NOT_ATTEMPTED } from '@/lib/quizGroup'
-import type { Question } from '@/lib/types'
-import TutorDayList from './TutorDayList'
-import TutorQuestionView from './TutorQuestionView'
 import InternTasksView from './InternTasksView'
 import AssignmentPanel from './AssignmentPanel'
 
@@ -815,113 +811,6 @@ function StarterCard({ starter, onClick }: { starter: Starter; onClick: () => vo
   )
 }
 
-// ─── Knowledge tab (local reducer) ───────────────────────────────────────────
-
-/**
- * Only the state it is wired to differs — a small local reducer scoped to
- * one starter's quiz rather than the app-wide console reducer.
- */
-interface KnowledgeState {
-  quiz:               Question[]
-  selectedQuestionId: string
-}
-
-type KnowledgeAction =
-  | { type: 'SELECT';        list: 'quiz'; id: string }
-  | { type: 'PATCH';         list: 'quiz'; id: string; patch: Partial<Question> }
-  | { type: 'REGENERATE';    list: 'quiz'; id: string }
-  | { type: 'SELECT_DAY';    day: number }
-  | { type: 'REORDER_DAYS';  from: number; to: number }
-  | { type: 'ADD_DAY' }
-  | { type: 'ADD_QUESTION';  day: number }
-
-function knowledgeReducer(state: KnowledgeState, action: KnowledgeAction): KnowledgeState {
-  const { quiz } = state
-
-  if (action.type === 'SELECT') {
-    return { ...state, selectedQuestionId: action.id }
-  }
-  if (action.type === 'PATCH') {
-    return { ...state, quiz: quiz.map(q => q.id === action.id ? { ...q, ...action.patch } : q) }
-  }
-  if (action.type === 'REGENERATE') {
-    return {
-      ...state,
-      quiz: quiz.map(q =>
-        q.id === action.id ? { ...q, explanation: q.altExplanation, altExplanation: q.explanation } : q
-      ),
-    }
-  }
-  if (action.type === 'SELECT_DAY') {
-    const first = quiz.find(q => q.start === action.day)
-    return first ? { ...state, selectedQuestionId: first.id } : state
-  }
-  if (action.type === 'REORDER_DAYS') {
-    const days = groupByDay(quiz)
-    if (action.from === action.to) return state
-    const blocks = [...days]
-    const [block] = blocks.splice(action.from, 1)
-    blocks.splice(action.to, 0, block!)
-    return { ...state, quiz: blocks.flatMap(d => d.questions) }
-  }
-  if (action.type === 'ADD_DAY') {
-    const days = groupByDay(quiz)
-    const lastDay = days[days.length - 1]
-    const newDay  = lastDay ? lastDay.day + 5 : 0
-    const newId   = `kt-d${newDay}-${Date.now()}`
-    const q: Question = {
-      id: newId, dayLabel: 'New topic', prompt: 'New question',
-      system: 'Docs', options: [{ id: 'a', text: 'Option A' }, { id: 'b', text: 'Option B' }],
-      correctOptionId: 'a', explanation: '', altExplanation: '',
-      highlight: { x: 0.3, y: 0.34, width: 0.4, height: 0.2, label: 'region' },
-      scene: { view: 'quiz', sidebarIndex: 6, rowIndex: -1 },
-      start: newDay, end: newDay + 1, points: 10,
-      result: { chosenOptionId: '', correct: false, score: 0, attemptedAt: NOT_ATTEMPTED, passThreshold: 80, acknowledgement: '' },
-    }
-    return { quiz: [...quiz, q], selectedQuestionId: q.id }
-  }
-  if (action.type === 'ADD_QUESTION') {
-    const template = quiz.find(q => q.start === action.day)
-    if (!template) return state
-    const newId = `kt-${action.day}-${Date.now()}`
-    const q: Question = {
-      ...template, id: newId, prompt: 'New question',
-      options: [{ id: 'a', text: 'Option A' }, { id: 'b', text: 'Option B' }],
-      correctOptionId: 'a', explanation: '', altExplanation: '', note: undefined,
-      result: { chosenOptionId: '', correct: false, score: 0, attemptedAt: NOT_ATTEMPTED, passThreshold: 80, acknowledgement: '' },
-    }
-    return { quiz: [...quiz, q], selectedQuestionId: q.id }
-  }
-  return state
-}
-
-function KnowledgeTab({ starter }: { starter: Starter }) {
-  const [state, dispatch] = useReducer(
-    knowledgeReducer,
-    { quiz: starter.quiz, selectedQuestionId: starter.quiz[0]?.id ?? '' },
-  )
-
-  const days = groupByDay(state.quiz)
-  const currentDay = days.find(d => d.questions.some(q => q.id === state.selectedQuestionId)) ?? days[0]
-
-  if (!currentDay) return <div style={{ padding: 32, color: 'var(--color-ink-muted)' }}>No quiz data.</div>
-
-  return (
-    <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-      <aside style={{ width: 320, flexShrink: 0, borderRight: '1px solid var(--color-border)', background: 'var(--color-surface)' }}>
-        <TutorDayList days={days} selectedDay={currentDay.day} dispatch={dispatch} />
-      </aside>
-      <TutorQuestionView
-        day={currentDay}
-        days={days}
-        selectedQuestionId={state.selectedQuestionId}
-        dispatch={dispatch}
-      />
-    </div>
-  )
-}
-
-
 // ─── Header stat tile ─────────────────────────────────────────────────────────
 // (DeadlineLabel, ProgrammeBar and ChecklistTab removed — progress is computed
 //  from real task rows; the 'Tasks' tab already surfaces them via InternTasksView)
@@ -955,11 +844,8 @@ function HeaderStat({ label, value, tone = 'plain' }: { label: string; value: st
 // ─── Detail view ─────────────────────────────────────────────────────────────
 
 function DetailView({ starter, onBack, orgId }: { starter: Starter; onBack: () => void; orgId: string }) {
-  const [tab, setTab] = useState<'tasks' | 'knowledge' | 'quizzes'>('tasks')
-  const pct      = taskPct(starter)
-  const avg      = averageScore(starter)
-  const ans      = answeredCount(starter)
-  const totalQ   = starter.quiz.length
+  const [tab, setTab] = useState<'tasks' | 'knowledge'>('tasks')
+  const pct = taskPct(starter)
 
   // Escape goes back
   useEffect(() => {
@@ -967,9 +853,6 @@ function DetailView({ starter, onBack, orgId }: { starter: Starter; onBack: () =
     window.addEventListener('keydown', h)
     return () => window.removeEventListener('keydown', h)
   }, [onBack])
-
-  const avgTone: StatTone = avg === null ? 'plain' : avg >= PASS_THRESHOLD ? 'correct' : 'incorrect'
-  const avgDisplay = avg === null ? '—' : `${avg}%`
 
   // Shared container: every row in this view aligns to the same column.
   const W: React.CSSProperties = { maxWidth: 1100, margin: '0 auto', padding: '0 24px', width: '100%' }
@@ -1026,8 +909,6 @@ function DetailView({ starter, onBack, orgId }: { starter: Starter; onBack: () =
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'flex-start' }}>
             <HeaderStat label="Tasks"    value={`${starter.taskDone}/${starter.taskTotal}`} tone="violet" />
             <HeaderStat label="Progress" value={`${pct}%`}                                  tone="plain"  />
-            <HeaderStat label="Answered" value={`${ans}/${totalQ}`}                         tone="yellow" />
-            <HeaderStat label="Average"  value={avgDisplay}                                 tone={avgTone} />
           </div>
 
           {/* Progress track from real task counts */}
@@ -1040,7 +921,7 @@ function DetailView({ starter, onBack, orgId }: { starter: Starter; onBack: () =
       {/* Tab strip */}
       <div style={{ ...W, paddingBottom: 16 }}>
         <div style={{ display: 'flex', gap: 4 }}>
-          {(['tasks', 'knowledge', 'quizzes'] as const).map(t => (
+          {(['tasks', 'knowledge'] as const).map(t => (
             <button
               key={t} type="button"
               onClick={() => setTab(t)}
@@ -1067,13 +948,8 @@ function DetailView({ starter, onBack, orgId }: { starter: Starter; onBack: () =
           </div>
         )}
         {tab === 'knowledge' && (
-          <div style={{ height: 'calc(100vh - 280px)', display: 'flex', overflow: 'hidden' }}>
-            <KnowledgeTab starter={starter} />
-          </div>
-        )}
-        {tab === 'quizzes' && (
           <div style={{ ...W }}>
-            <AssignmentPanel profileId={starter.id} />
+            <AssignmentPanel profileId={starter.id} orgId={orgId} />
           </div>
         )}
       </div>

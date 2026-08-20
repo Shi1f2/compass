@@ -3,6 +3,9 @@
  * Intern's own task list with checkboxes.
  * Reads tasks via the browser client; toggle calls a server action.
  * The DB trigger sets completed_at — the client only sends status.
+ *
+ * view='checklist' (default) — Tasks tab: heading + tickable rows; no bar.
+ * view='bar'                 — Profile page: segmented bar card only; no rows.
  */
 'use client'
 
@@ -13,9 +16,16 @@ import type { Task } from '@/lib/database.types'
 import { toggleTaskStatus } from '@/lib/task-actions'
 import TaskBar from './TaskBar'
 
+// ─── Props ────────────────────────────────────────────────────────────────────
+
+interface InternTasksProps {
+  /** Which portion to render. Defaults to 'checklist'. */
+  view?: 'checklist' | 'bar'
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function InternTasks() {
+export default function InternTasks({ view = 'checklist' }: InternTasksProps) {
   const supabase = createClient()
 
   const [tasks,       setTasks]       = useState<Task[]>([])
@@ -77,9 +87,6 @@ export default function InternTasks() {
     }
   }, [])
 
-  const doneCount  = tasks.filter(t => t.status === 'done').length
-  const totalCount = tasks.length
-
   if (loading) {
     return (
       <div style={{ padding: '48px 24px', textAlign: 'center', color: 'var(--color-ink-muted)', fontSize: 13 }}>
@@ -95,6 +102,23 @@ export default function InternTasks() {
       </div>
     )
   }
+
+  // ── bar view ────────────────────────────────────────────────────────────────
+  // Profile page: segmented bar card only.
+
+  if (view === 'bar') {
+    if (tasks.length === 0) {
+      return (
+        <p style={{ fontSize: 13, color: 'var(--color-ink-muted)' }}>
+          No tasks assigned yet.
+        </p>
+      )
+    }
+    return <TaskBar tasks={tasks} jobRoleName={jobRoleName} />
+  }
+
+  // ── checklist view (default) ────────────────────────────────────────────────
+  // Tasks tab: heading + tickable rows; no bar.
 
   if (tasks.length === 0) {
     return (
@@ -131,10 +155,7 @@ export default function InternTasks() {
           </p>
         </div>
 
-        {/* Segmented progress bar */}
-        <TaskBar tasks={tasks} jobRoleName={jobRoleName} onSegmentClick={scrollToTask} />
-
-        {/* Task list */}
+        {/* Task list — no bar here */}
         <div className="card" style={{ overflow: 'hidden', padding: 0 }}>
           {tasks.map((task, idx) => {
             const done       = task.status === 'done'

@@ -1,7 +1,7 @@
 /**
  * components/console/OnboardingProgramme.tsx
- * New starter's checklist view — renders their real onboarding tasks from the DB.
- * The hardcoded PROGRAMME constant and demo task data have been removed.
+ * Task-progress summary shown on the new starter's Profile page.
+ * Renders the segmented bar only — the checklist lives in the Tasks tab.
  */
 'use client'
 
@@ -13,5 +13,5 @@ interface OnboardingProgrammeProps {
 }
 
 export default function OnboardingProgramme(_props: OnboardingProgrammeProps) {
-  return <InternTasks />
+  return <InternTasks view="bar" />
 }
