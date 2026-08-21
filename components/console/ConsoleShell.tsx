@@ -61,6 +61,7 @@ export default function ConsoleShell({
 
   const [state,    dispatch]    = useReducer(consoleReducer, profile, initConsoleState)
   const [mode,     setMode]     = useState<Mode>(isSupervisor ? 'supervisor' : 'mentor')
+  const [quizActive, setQuizActive] = useState(false)
   const [query,    setQuery]    = useState('')
   const [asking,   setAsking]   = useState(false)
   const [askError, setAskError] = useState<string | null>(null)
@@ -328,7 +329,7 @@ export default function ConsoleShell({
     if (mode === 'quizzes' && !isSupervisor) {
       return (
         <div className="thin-scroll" style={{ flex: 1, overflowY: 'auto', padding: '24px 28px' }}>
-          <InternQuizView />
+          <InternQuizView onActiveQuizChange={setQuizActive} />
         </div>
       )
     }
@@ -436,9 +437,42 @@ export default function ConsoleShell({
             flexShrink:          0,
           }}
         >
-          {/* Left: lockup */}
+          {/* Left: lockup — home link */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start' }}>
-            <Lockup size="small" layout="inline" />
+            <a
+              href={isSupervisor ? '/supervisor' : '/console'}
+              aria-label="Compass — go to home"
+              onClick={e => {
+                e.preventDefault()
+                const homeMode: Mode = isSupervisor ? 'supervisor' : 'mentor'
+                if (mode === homeMode) return
+                if (
+                  !isSupervisor
+                  && quizActive
+                  && !window.confirm(
+                    'Your answers are saved, but this quiz hasn\'t been submitted yet.\n\nLeave anyway?'
+                  )
+                ) {
+                  return
+                }
+                setMode(homeMode)
+              }}
+              style={{
+                display:        'inline-flex',
+                alignItems:     'center',
+                cursor:         'pointer',
+                textDecoration: 'none',
+                color:          'inherit',
+                borderRadius:   6,
+                outline:        'none',
+              }}
+              onMouseEnter={e => { (e.currentTarget as HTMLAnchorElement).style.opacity = '0.75' }}
+              onMouseLeave={e => { (e.currentTarget as HTMLAnchorElement).style.opacity = '1'    }}
+              onFocus    ={e => { (e.currentTarget as HTMLAnchorElement).style.outline = '2px solid var(--color-accent)' }}
+              onBlur     ={e => { (e.currentTarget as HTMLAnchorElement).style.outline = 'none' }}
+            >
+              <Lockup size="small" layout="inline" />
+            </a>
           </div>
 
           {/* Centre: nav */}

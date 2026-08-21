@@ -125,8 +125,13 @@ export default function AssignmentPanel({ profileId, orgId }: AssignmentPanelPro
   // Once a new quiz is created, hold its Quiz object here to open QuizEditor
   const [createdQuiz, setCreatedQuiz] = useState<Quiz | null>(null)
 
-  // Scoring state — non-null when supervisor is reviewing a submitted assignment
-  const [scoring, setScoring] = useState<{ assignmentId: string; quizName: string } | null>(null)
+  // Scoring state — non-null when supervisor is reviewing a submitted/published assignment
+  const [scoring, setScoring] = useState<{
+    assignmentId:    string
+    quizName:        string
+    status:          string
+    overallFeedback: string | null
+  } | null>(null)
 
   // ── Load ─────────────────────────────────────────────────────────────────
 
@@ -264,6 +269,8 @@ export default function AssignmentPanel({ profileId, orgId }: AssignmentPanelPro
       <ScoringPanel
         assignmentId={scoring.assignmentId}
         quizName={scoring.quizName}
+        initialStatus={scoring.status}
+        initialFeedback={scoring.overallFeedback}
         onBack={() => { setScoring(null); load() }}
       />
     )
@@ -285,8 +292,8 @@ export default function AssignmentPanel({ profileId, orgId }: AssignmentPanelPro
 
   // ── Derived lists ──────────────────────────────────────────────────────────
 
-  const unfinished = assignments.filter(a => a.status !== 'submitted')
-  const finished   = assignments.filter(a => a.status === 'submitted')
+  const unfinished = assignments.filter(a => a.status !== 'submitted' && a.status !== 'published')
+  const finished   = assignments.filter(a => a.status === 'submitted' || a.status === 'published')
   const assignedQuizIds = new Set(assignments.map(a => a.quiz.id))
   const available = library.filter(q => !assignedQuizIds.has(q.id))
   const noOrgQuizzes = library.length === 0
@@ -414,11 +421,16 @@ export default function AssignmentPanel({ profileId, orgId }: AssignmentPanelPro
                     </div>
                   </div>
 
-                  {/* Score button */}
+                  {/* Score / Review button */}
                   <button
                     type="button"
-                    onClick={() => setScoring({ assignmentId: a.id, quizName: a.quiz.name })}
-                    title="Open scoring view"
+                    onClick={() => setScoring({
+                      assignmentId:    a.id,
+                      quizName:        a.quiz.name,
+                      status:          a.status,
+                      overallFeedback: null,
+                    })}
+                    title={a.status === 'published' ? 'View published review' : 'Open scoring view'}
                     style={{
                       flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
                       gap: 5, padding: '4px 10px', borderRadius: 6,
@@ -441,7 +453,7 @@ export default function AssignmentPanel({ profileId, orgId }: AssignmentPanelPro
                       el.style.borderColor = 'var(--color-border)'
                     }}
                   >
-                    <ClipboardCheck size={12} /> Score
+                    <ClipboardCheck size={12} /> {a.status === 'published' ? 'Review' : 'Score'}
                   </button>
                 </div>
               ))
@@ -612,6 +624,8 @@ export default function AssignmentPanel({ profileId, orgId }: AssignmentPanelPro
 const STATUS_STYLES: Record<string, { label: string; bg: string; color: string }> = {
   assigned:    { label: 'Not started', bg: 'var(--color-sunk)',         color: 'var(--color-ink-muted)' },
   in_progress: { label: 'In progress', bg: 'var(--color-yellow-soft)',  color: 'var(--color-waiting)'   },
+  submitted:   { label: 'Submitted',   bg: 'var(--color-yellow-soft)',  color: 'var(--color-waiting)'   },
+  published:   { label: 'Published',   bg: 'var(--color-correct-soft)', color: 'var(--color-correct)'   },
 }
 
 function StatusBadge({ status }: { status: string }) {

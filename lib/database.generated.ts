@@ -366,34 +366,43 @@ export type Database = {
       }
       quiz_assignments: {
         Row: {
-          assigned_at:  string
-          assigned_by:  string
-          completed_at: string | null
-          id:           string
-          org_id:       string
-          profile_id:   string
-          quiz_id:      string
-          status:       string
+          assigned_at:      string
+          assigned_by:      string
+          completed_at:     string | null
+          id:               string
+          org_id:           string
+          overall_feedback: string | null
+          profile_id:       string
+          published_at:     string | null
+          quiz_id:          string
+          reviewed_by:      string | null
+          status:           string
         }
         Insert: {
-          assigned_at?:  string
-          assigned_by:   string
-          completed_at?: string | null
-          id?:           string
-          org_id:        string
-          profile_id:    string
-          quiz_id:       string
-          status?:       string
+          assigned_at?:      string
+          assigned_by:       string
+          completed_at?:     string | null
+          id?:               string
+          org_id:            string
+          overall_feedback?: string | null
+          profile_id:        string
+          published_at?:     string | null
+          quiz_id:           string
+          reviewed_by?:      string | null
+          status?:           string
         }
         Update: {
-          assigned_at?:  string
-          assigned_by?:  string
-          completed_at?: string | null
-          id?:           string
-          org_id?:       string
-          profile_id?:   string
-          quiz_id?:      string
-          status?:       string
+          assigned_at?:      string
+          assigned_by?:      string
+          completed_at?:     string | null
+          id?:               string
+          org_id?:           string
+          overall_feedback?: string | null
+          profile_id?:       string
+          published_at?:     string | null
+          quiz_id?:          string
+          reviewed_by?:      string | null
+          status?:           string
         }
         Relationships: [
           {
@@ -514,7 +523,29 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      intern_quiz_results: {
+        Row: {
+          answer_id:        string
+          assignment_id:    string
+          completed_at:     string | null
+          correct_option:   number | null
+          kind:             string
+          model_answer:     string | null
+          options:          string[] | null
+          order_index:      number
+          overall_feedback: string | null
+          profile_id:       string
+          prompt:           string
+          published_at:     string | null
+          question_id:      string
+          score:            number | null
+          scored_at:        string | null
+          selected_option:  number | null
+          status:           string
+          text_answer:      string | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       [_ in never]: never

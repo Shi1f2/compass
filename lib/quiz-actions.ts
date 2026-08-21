@@ -401,7 +401,7 @@ export async function scoreAnswer(
   if (fetchErr) return { error: fetchErr.message }
   if (!answer)  return { error: 'Answer not found.' }
 
-  if (answer.quiz_assignments.status !== 'submitted') {
+  if (!['submitted', 'published'].includes(answer.quiz_assignments.status)) {
     return { error: 'Quiz has not been submitted yet.' }
   }
   if (answer.quiz_questions.kind !== 'open') {
@@ -491,13 +491,86 @@ export async function unassignQuiz(
   const isSupervisee = await verifySupervisee(caller.id, assignment.profile_id)
   if (!isSupervisee) return { error: 'This assignment does not belong to one of your interns.' }
 
-  if (assignment.status === 'submitted') {
-    return { error: 'A submitted assignment cannot be removed.' }
+  if (assignment.status === 'submitted' || assignment.status === 'published') {
+    return { error: 'A submitted or published assignment cannot be removed.' }
   }
 
   const { error } = await db
     .from('quiz_assignments')
     .delete()
+    .eq('id', assignmentId)
+
+  if (error) return { error: error.message }
+  return { error: null }
+}
+
+// ─── Publish assignment ───────────────────────────────────────────────────────
+
+/**
+ * Publish a submitted assignment so the intern can see the review.
+ *
+ * Sets status → 'published', published_at, reviewed_by, and optionally
+ * overall_feedback in a single update.
+ *
+ * Pre-condition: every open question must have a score.  The action
+ * checks this explicitly and returns the count of unscored open questions
+ * in the error so the UI can surface the reason for the disabled state.
+ */
+export async function publishAssignment(
+  assignmentId:    string,
+  overallFeedback: string | null,
+): Promise<{ error: string | null; unscoredCount?: number }> {
+  const caller = await requireSupervisor()
+  if (!caller) return { error: 'Unauthorized' }
+
+  const db = createClient()
+
+  // Fetch assignment + verify ownership
+  const { data: assignment, error: fetchErr } = await db
+    .from('quiz_assignments')
+    .select('id, profile_id, status, quiz_id')
+    .eq('id', assignmentId)
+    .maybeSingle()
+
+  if (fetchErr) return { error: fetchErr.message }
+  if (!assignment) return { error: 'Assignment not found.' }
+  if (assignment.status !== 'submitted') {
+    return { error: 'Only submitted assignments can be published.' }
+  }
+
+  const isSupervisee = await verifySupervisee(caller.id, assignment.profile_id)
+  if (!isSupervisee) return { error: 'This assignment does not belong to one of your interns.' }
+
+  // Count unscored open questions
+  const { data: openAnswers, error: openErr } = await db
+    .from('quiz_answers')
+    .select('id, score, quiz_questions!inner(kind)')
+    .eq('assignment_id', assignmentId) as unknown as {
+      data: { id: string; score: number | null; quiz_questions: { kind: string } }[] | null
+      error: { message: string } | null
+    }
+
+  if (openErr) return { error: openErr.message }
+
+  const unscoredCount = (openAnswers ?? []).filter(
+    a => a.quiz_questions.kind === 'open' && a.score === null
+  ).length
+
+  if (unscoredCount > 0) {
+    return {
+      error: `${unscoredCount} open question${unscoredCount !== 1 ? 's' : ''} still need scoring before publishing.`,
+      unscoredCount,
+    }
+  }
+
+  const { error } = await db
+    .from('quiz_assignments')
+    .update({
+      status:           'published',
+      published_at:     new Date().toISOString(),
+      reviewed_by:      caller.id,
+      overall_feedback: overallFeedback?.trim() || null,
+    })
     .eq('id', assignmentId)
 
   if (error) return { error: error.message }

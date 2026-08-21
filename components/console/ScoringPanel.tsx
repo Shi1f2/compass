@@ -1,26 +1,26 @@
 /**
  * components/console/ScoringPanel.tsx
  *
- * Supervisor view for scoring a submitted quiz assignment.
- * Opened from AssignmentPanel when the supervisor clicks a submitted row.
+ * Supervisor view for scoring a submitted quiz assignment and publishing the
+ * review to the intern.
  *
  * Layout:
- *  - One question per card; all visible without pagination (scoring is a review
- *    task, the supervisor needs the full picture at once).
- *  - MC questions: show the intern's choice vs the correct answer, auto-score
- *    badge, no editable field.
- *  - Open questions: show the intern's text answer, an editable 0–100 score
- *    input, and a Save button per question.
+ *  - One question per card; all visible without pagination.
+ *  - MC questions: show the intern's choice vs the correct answer, auto-score badge.
+ *  - Open questions: show the intern's text answer, score input, Save per question.
+ *  - Below the questions: overall feedback textarea + "Save and publish" button.
+ *    The button is disabled while any open question is unscored.
+ *  - After publishing the view stays readable; scores remain editable.
  *
  * Reads  — browser client, RLS-scoped to supervisor's supervisees.
- * Writes — scoreAnswer server action (supervisor-only, supervisee-checked).
+ * Writes — scoreAnswer / publishAssignment server actions (supervisor-only).
  */
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
 import { ArrowLeft, CheckCircle2, XCircle } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
-import { scoreAnswer } from '@/lib/quiz-actions'
+import { publishAssignment, scoreAnswer } from '@/lib/quiz-actions'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -245,26 +245,38 @@ function McResultRow({ row }: { row: QuestionWithAnswer }) {
 
 interface ScoringPanelProps {
   /** The assignment id to score. */
-  assignmentId: string
+  assignmentId:     string
   /** Quiz name — shown in the header. */
-  quizName:     string
+  quizName:         string
+  /** Current status of the assignment. */
+  initialStatus:    string
+  /** Initial overall feedback (if already published). */
+  initialFeedback:  string | null
   /** Called when the supervisor clicks the back button. */
-  onBack:       () => void
+  onBack:           () => void
 }
 
-export default function ScoringPanel({ assignmentId, quizName, onBack }: ScoringPanelProps) {
+export default function ScoringPanel({
+  assignmentId,
+  quizName,
+  initialStatus,
+  initialFeedback,
+  onBack,
+}: ScoringPanelProps) {
   const supabase = createClient()
 
-  const [rows,    setRows]    = useState<QuestionWithAnswer[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error,   setError]   = useState<string | null>(null)
+  const [rows,       setRows]       = useState<QuestionWithAnswer[]>([])
+  const [loading,    setLoading]    = useState(true)
+  const [error,      setError]      = useState<string | null>(null)
+  const [status,     setStatus]     = useState(initialStatus)
+  const [feedback,   setFeedback]   = useState(initialFeedback ?? '')
+  const [publishing, setPublishing] = useState(false)
+  const [publishErr, setPublishErr] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
     setError(null)
 
-    // Fetch questions for this assignment's quiz, then answers separately.
-    // Two queries to avoid the PostgREST nested join depth limit.
     const { data: assignment } = await supabase
       .from('quiz_assignments')
       .select('quiz_id')
@@ -320,9 +332,6 @@ export default function ScoringPanel({ assignmentId, quizName, onBack }: Scoring
 
   useEffect(() => { load() }, [load])
 
-  // Update a single row's score locally after a successful save — avoids
-  // a full reload and prevents the input from resetting while the supervisor
-  // is still working through the question list.
   function handleScoreSaved(answerId: string, newScore: number) {
     setRows(prev => prev.map(r =>
       r.answerId === answerId
@@ -331,12 +340,22 @@ export default function ScoringPanel({ assignmentId, quizName, onBack }: Scoring
     ))
   }
 
+  async function handlePublish() {
+    setPublishing(true)
+    setPublishErr(null)
+    const { error: e } = await publishAssignment(assignmentId, feedback || null)
+    setPublishing(false)
+    if (e) { setPublishErr(e); return }
+    setStatus('published')
+  }
+
   // ── Summary stats ────────────────────────────────────────────────────────
 
-  const openRows  = rows.filter(r => r.kind === 'open')
-  const scoredOpen = openRows.filter(r => r.score !== null).length
-  const allOpenScored = openRows.length > 0 && scoredOpen === openRows.length
-  const hasOpen = openRows.length > 0
+  const openRows      = rows.filter(r => r.kind === 'open')
+  const scoredOpen    = openRows.filter(r => r.score !== null).length
+  const unscoredCount = openRows.length - scoredOpen
+  const canPublish    = unscoredCount === 0 && status === 'submitted'
+  const isPublished   = status === 'published'
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -359,10 +378,20 @@ export default function ScoringPanel({ assignmentId, quizName, onBack }: Scoring
       </button>
 
       <div style={{ marginBottom: 24 }}>
-        <h2 style={{ margin: '0 0 4px', fontSize: 18, fontWeight: 600 }}>{quizName}</h2>
-        {hasOpen && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 4 }}>
+          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>{quizName}</h2>
+          {isPublished && (
+            <span style={{
+              padding: '2px 10px', borderRadius: 9999, fontSize: 11, fontWeight: 500,
+              background: 'var(--color-correct-soft)', color: 'var(--color-correct)',
+            }}>
+              Published
+            </span>
+          )}
+        </div>
+        {openRows.length > 0 && (
           <p style={{ margin: 0, fontSize: 12, color: 'var(--color-ink-muted)' }}>
-            {allOpenScored
+            {unscoredCount === 0
               ? 'All open questions scored.'
               : `${scoredOpen} of ${openRows.length} open question${openRows.length !== 1 ? 's' : ''} scored.`
             }
@@ -411,6 +440,69 @@ export default function ScoringPanel({ assignmentId, quizName, onBack }: Scoring
           </div>
         ))}
       </div>
+
+      {/* Publish section — shown after questions load */}
+      {!loading && !error && rows.length > 0 && (
+        <div className="card" style={{ padding: 24, marginTop: 24 }}>
+          <p style={{
+            margin: '0 0 10px', fontSize: 12, fontWeight: 600,
+            color: 'var(--color-ink-muted)', textTransform: 'uppercase', letterSpacing: '0.08em',
+          }}>
+            Overall feedback (optional)
+          </p>
+          <textarea
+            value={feedback}
+            onChange={e => setFeedback(e.target.value)}
+            readOnly={isPublished}
+            placeholder="Write a short note for the intern about the quiz as a whole…"
+            rows={4}
+            style={{
+              width: '100%', boxSizing: 'border-box',
+              padding: '10px 12px', borderRadius: 8,
+              border: '1px solid var(--color-border)',
+              background: isPublished ? 'var(--color-sunk)' : 'var(--color-surface)',
+              fontSize: 13, color: 'var(--color-ink)',
+              fontFamily: 'var(--font-sans)', lineHeight: 1.6,
+              resize: 'vertical', outline: 'none',
+              marginBottom: 14,
+            }}
+          />
+
+          {isPublished ? (
+            <p style={{ margin: 0, fontSize: 13, color: 'var(--color-correct)', fontWeight: 500 }}>
+              ✓ Review published — the intern can now see their results.
+            </p>
+          ) : (
+            <div>
+              {unscoredCount > 0 && (
+                <p style={{ margin: '0 0 10px', fontSize: 12, color: 'var(--color-ink-muted)' }}>
+                  {unscoredCount} open question{unscoredCount !== 1 ? 's' : ''} still need{unscoredCount === 1 ? 's' : ''} scoring before you can publish.
+                </p>
+              )}
+              {publishErr && (
+                <p style={{ margin: '0 0 10px', fontSize: 12, color: 'var(--color-incorrect)' }}>{publishErr}</p>
+              )}
+              <button
+                type="button"
+                disabled={!canPublish || publishing}
+                onClick={handlePublish}
+                title={canPublish ? undefined : 'Score all open questions first'}
+                style={{
+                  padding: '8px 20px', borderRadius: 9999, border: 'none',
+                  cursor: !canPublish || publishing ? 'default' : 'pointer',
+                  fontSize: 13, fontWeight: 600,
+                  background: 'var(--color-accent)', color: '#fff',
+                  fontFamily: 'var(--font-sans)',
+                  opacity: !canPublish || publishing ? 0.45 : 1,
+                  transition: 'opacity 150ms',
+                }}
+              >
+                {publishing ? 'Publishing…' : 'Save and publish'}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }

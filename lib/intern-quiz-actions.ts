@@ -67,7 +67,9 @@ export async function saveAnswer(
     .maybeSingle()
 
   if (!assignment) return { error: 'Assignment not found.' }
-  if (assignment.status === 'submitted') return { error: 'This quiz has already been submitted.' }
+  if (assignment.status === 'submitted' || assignment.status === 'published') {
+    return { error: 'This quiz has already been submitted.' }
+  }
 
   // Upsert — the unique index on (assignment_id, question_id) means a second
   // save for the same question updates the existing row rather than duplicating.
@@ -112,7 +114,9 @@ export async function submitQuiz(
     .maybeSingle()
 
   if (!assignment) return { error: 'Assignment not found.' }
-  if (assignment.status === 'submitted') return { error: 'Already submitted.' }
+  if (assignment.status === 'submitted' || assignment.status === 'published') {
+    return { error: 'Already submitted.' }
+  }
 
   const { error } = await db
     .from('quiz_assignments')

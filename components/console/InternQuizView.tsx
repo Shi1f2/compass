@@ -1,20 +1,22 @@
 /**
  * components/console/InternQuizView.tsx
  *
- * Intern-facing quiz answering view.
+ * Intern-facing quiz answering + results view.
  *
- * Layout:
- *  - List view: cards for each assigned quiz (status badge, click to open)
- *  - Detail view: one question at a time (previous / next navigation),
- *    auto-save on every answer change, Submit button on the last question.
+ * States per assignment:
+ *  - assigned / in_progress  → answering flow (question-by-question)
+ *  - submitted               → "Waiting for review" banner, read-only
+ *  - published               → full result view (scores, model answers, feedback)
  *
  * Reads  — browser client, RLS-scoped to intern's own assignments/answers.
+ *           Published results are read from the security-definer view
+ *           intern_quiz_results (see migration 20250109000000_quiz_publish.sql).
  * Writes — saveAnswer / submitQuiz server actions (intern-only, ownership-checked).
  */
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ArrowLeft, ArrowRight, CheckCircle2, ChevronLeft } from 'lucide-react'
+import { ArrowLeft, ArrowRight, ChevronLeft, Clock } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { saveAnswer, submitQuiz } from '@/lib/intern-quiz-actions'
 
@@ -53,12 +55,32 @@ interface AnswerRow {
   score:           number | null
 }
 
+// Rows returned by the security-definer view intern_quiz_results
+interface PublishedResultRow {
+  answer_id:        string
+  assignment_id:    string
+  overall_feedback: string | null
+  published_at:     string | null
+  question_id:      string
+  selected_option:  number | null
+  text_answer:      string | null
+  score:            number | null
+  scored_at:        string | null
+  kind:             string
+  prompt:           string
+  options:          string[] | null
+  correct_option:   number | null
+  model_answer:     string | null
+  order_index:      number
+}
+
 // ─── Status badge ─────────────────────────────────────────────────────────────
 
 const STATUS_STYLES: Record<string, { label: string; bg: string; color: string }> = {
-  assigned:    { label: 'Not started', bg: 'var(--color-sunk)',         color: 'var(--color-ink-muted)' },
-  in_progress: { label: 'In progress', bg: 'var(--color-yellow-soft)',  color: 'var(--color-waiting)'   },
-  submitted:   { label: 'Submitted',   bg: 'var(--color-correct-soft)', color: 'var(--color-correct)'   },
+  assigned:    { label: 'Not started',  bg: 'var(--color-sunk)',         color: 'var(--color-ink-muted)' },
+  in_progress: { label: 'In progress',  bg: 'var(--color-yellow-soft)',  color: 'var(--color-waiting)'   },
+  submitted:   { label: 'Submitted',    bg: 'var(--color-yellow-soft)',  color: 'var(--color-waiting)'   },
+  published:   { label: 'Reviewed',     bg: 'var(--color-correct-soft)', color: 'var(--color-correct)'   },
 }
 
 function StatusBadge({ status }: { status: string }) {
@@ -107,6 +129,251 @@ function ProgressDots({
       <span style={{ fontSize: 11, color: 'var(--color-ink-muted)', marginLeft: 4 }}>
         {current + 1} / {total}
       </span>
+    </div>
+  )
+}
+
+// ─── Score bar (0-100) ────────────────────────────────────────────────────────
+
+function ScoreBar({ score }: { score: number | null }) {
+  if (score === null) return null
+  const color = score >= 80 ? 'var(--color-correct)' : score >= 50 ? 'var(--color-waiting)' : 'var(--color-incorrect)'
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+      <div style={{ flex: 1, height: 6, borderRadius: 9999, background: 'var(--color-sunk)', overflow: 'hidden' }}>
+        <div style={{ width: `${score}%`, height: '100%', background: color, borderRadius: 9999, transition: 'width 300ms' }} />
+      </div>
+      <span style={{ fontSize: 12, fontWeight: 600, color, minWidth: 36, textAlign: 'right' }}>
+        {score}/100
+      </span>
+    </div>
+  )
+}
+
+// ─── Published result — single question card ─────────────────────────────────
+
+function PublishedQuestionCard({ row, idx }: { row: PublishedResultRow; idx: number }) {
+  const options = row.options ?? []
+
+  return (
+    <div className="card" style={{ padding: 24 }}>
+      {/* Header */}
+      <div style={{
+        fontSize: 11, fontWeight: 600, color: 'var(--color-ink-muted)',
+        textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 6,
+      }}>
+        Q{idx + 1} &middot; {row.kind === 'multiple_choice' ? 'Multiple choice' : 'Open'}
+      </div>
+      <p style={{ margin: '0 0 16px', fontSize: 14, fontWeight: 500, color: 'var(--color-ink)', lineHeight: 1.5 }}>
+        {row.prompt}
+      </p>
+
+      {row.kind === 'multiple_choice' ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 }}>
+          {options.map((opt, i) => {
+            const isChosen  = row.selected_option === i
+            const isCorrect = row.correct_option  === i
+            const highlight =
+              isChosen && isCorrect  ? 'correct' :
+              isChosen && !isCorrect ? 'incorrect' :
+              isCorrect              ? 'correct-unselected' : 'neutral'
+            const styleMap: Record<string, { border: string; bg: string; color: string }> = {
+              correct:              { border: 'var(--color-correct)',   bg: 'var(--color-correct-soft)',   color: 'var(--color-correct)'   },
+              incorrect:            { border: 'var(--color-incorrect)', bg: 'var(--color-incorrect-soft)', color: 'var(--color-incorrect)' },
+              'correct-unselected': { border: 'var(--color-correct)',   bg: 'transparent',                 color: 'var(--color-correct)'   },
+              neutral:              { border: 'var(--color-border)',    bg: 'transparent',                 color: 'var(--color-ink-muted)' },
+            }
+            const s = styleMap[highlight]!
+            return (
+              <div
+                key={i}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 10,
+                  padding: '8px 12px', borderRadius: 8,
+                  border: `1.5px solid ${s.border}`,
+                  background: s.bg, fontSize: 13,
+                }}
+              >
+                <span style={{ fontWeight: 500, color: s.color, minWidth: 20 }}>
+                  {String.fromCharCode(65 + i)}.
+                </span>
+                <span style={{ flex: 1, color: 'var(--color-ink)' }}>{opt}</span>
+              </div>
+            )
+          })}
+          {row.selected_option === null && (
+            <p style={{ margin: 0, fontSize: 12, color: 'var(--color-ink-muted)', fontStyle: 'italic' }}>No answer selected</p>
+          )}
+        </div>
+      ) : (
+        <div>
+          {/* Intern's text answer */}
+          <div style={{
+            padding: '10px 12px', borderRadius: 8, marginBottom: 12,
+            background: 'var(--color-sunk)',
+            fontSize: 13, color: 'var(--color-ink)', lineHeight: 1.6,
+            whiteSpace: 'pre-wrap', wordBreak: 'break-word', minHeight: 44,
+          }}>
+            {row.text_answer?.trim()
+              ? row.text_answer
+              : <span style={{ color: 'var(--color-ink-muted)', fontStyle: 'italic' }}>No answer provided</span>
+            }
+          </div>
+
+          {/* Score bar */}
+          <div style={{ marginBottom: 12 }}>
+            <ScoreBar score={row.score} />
+          </div>
+
+          {/* Model answer */}
+          {row.model_answer?.trim() && (
+            <div style={{
+              padding: '10px 12px', borderRadius: 8,
+              background: 'var(--color-accent-soft)',
+              fontSize: 12, color: 'var(--color-ink)', lineHeight: 1.6,
+              whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+            }}>
+              <span style={{
+                display: 'block', fontSize: 10, fontWeight: 600,
+                color: 'var(--color-ink-muted)', textTransform: 'uppercase',
+                letterSpacing: '0.08em', marginBottom: 4,
+              }}>
+                Model answer
+              </span>
+              {row.model_answer}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Score for MC */}
+      {row.kind === 'multiple_choice' && row.score !== null && (
+        <div style={{ marginTop: 6 }}>
+          <ScoreBar score={row.score} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Published result view ────────────────────────────────────────────────────
+
+function PublishedResultView({
+  assignment,
+  onBack,
+}: {
+  assignment: AssignedQuizWithQuiz
+  onBack:     () => void
+}) {
+  const supabase = createClient()
+
+  const [rows,      setRows]      = useState<PublishedResultRow[]>([])
+  const [feedback,  setFeedback]  = useState<string | null>(null)
+  const [loading,   setLoading]   = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    async function load() {
+      setLoading(true)
+      setLoadError(null)
+
+      const { data, error } = await (supabase
+        .from('intern_quiz_results')
+        .select('*')
+        .eq('assignment_id', assignment.id)
+        .order('order_index', { ascending: true }) as unknown as
+        Promise<{ data: PublishedResultRow[] | null; error: { message: string } | null }>)
+
+      if (cancelled) return
+      if (error) { setLoadError(error.message); setLoading(false); return }
+
+      const resultRows = data ?? []
+      setRows(resultRows)
+      setFeedback(resultRows[0]?.overall_feedback ?? null)
+      setLoading(false)
+    }
+    load()
+    return () => { cancelled = true }
+  }, [assignment.id, supabase])
+
+  // Total score — mean of all scored questions
+  const scoredRows  = rows.filter(r => r.score !== null)
+  const totalScore  = scoredRows.length > 0
+    ? Math.round(scoredRows.reduce((s, r) => s + (r.score ?? 0), 0) / scoredRows.length)
+    : null
+
+  return (
+    <div style={{ maxWidth: 680 }}>
+      <BackButton onBack={onBack} />
+
+      <div style={{ marginTop: 8, marginBottom: 24 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600, color: 'var(--color-ink)' }}>
+            {assignment.quiz.name}
+          </h2>
+          <StatusBadge status="published" />
+        </div>
+        {assignment.quiz.description && (
+          <p style={{ margin: '6px 0 0', fontSize: 13, color: 'var(--color-ink-muted)', lineHeight: 1.5 }}>
+            {assignment.quiz.description}
+          </p>
+        )}
+      </div>
+
+      {loading && (
+        <p style={{ fontSize: 13, color: 'var(--color-ink-muted)' }}>Loading results…</p>
+      )}
+      {loadError && (
+        <p style={{ fontSize: 13, color: 'var(--color-incorrect)' }}>{loadError}</p>
+      )}
+
+      {!loading && !loadError && (
+        <>
+          {/* Total score card */}
+          {totalScore !== null && (
+            <div className="card" style={{ padding: 20, marginBottom: 20, display: 'flex', alignItems: 'center', gap: 20 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{
+                  fontSize: 11, fontWeight: 600, color: 'var(--color-ink-muted)',
+                  textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 6,
+                }}>
+                  Total score
+                </div>
+                <ScoreBar score={totalScore} />
+              </div>
+              <div style={{
+                fontSize: 28, fontWeight: 700,
+                color: totalScore >= 80 ? 'var(--color-correct)' : totalScore >= 50 ? 'var(--color-waiting)' : 'var(--color-incorrect)',
+              }}>
+                {totalScore}<span style={{ fontSize: 14, fontWeight: 400, color: 'var(--color-ink-muted)' }}>/100</span>
+              </div>
+            </div>
+          )}
+
+          {/* Per-question results */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 20 }}>
+            {rows.map((row, idx) => (
+              <PublishedQuestionCard key={row.question_id} row={row} idx={idx} />
+            ))}
+          </div>
+
+          {/* Overall feedback */}
+          {feedback?.trim() && (
+            <div className="card" style={{ padding: 20 }}>
+              <div style={{
+                fontSize: 11, fontWeight: 600, color: 'var(--color-ink-muted)',
+                textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8,
+              }}>
+                Supervisor&apos;s feedback
+              </div>
+              <p style={{ margin: 0, fontSize: 13, color: 'var(--color-ink)', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
+                {feedback}
+              </p>
+            </div>
+          )}
+        </>
+      )}
     </div>
   )
 }
@@ -274,18 +541,18 @@ function QuizDetail({
         )}
       </div>
 
-      {/* Submitted state */}
+      {/* Submitted state — waiting for supervisor review */}
       {submitted ? (
         <div className="card" style={{ padding: 28, textAlign: 'center' }}>
-          <CheckCircle2
+          <Clock
             size={36}
-            style={{ color: 'var(--color-correct)', marginBottom: 12 }}
+            style={{ color: 'var(--color-waiting)', marginBottom: 12 }}
           />
           <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--color-ink)', marginBottom: 6 }}>
-            Quiz submitted
+            Submitted — waiting for review
           </div>
           <div style={{ fontSize: 13, color: 'var(--color-ink-muted)' }}>
-            Your answers have been recorded. Your supervisor will review them shortly.
+            Your answers have been recorded. Your supervisor will score and publish the results.
           </div>
         </div>
       ) : (
@@ -452,59 +719,97 @@ function QuizList({
     )
   }
 
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, maxWidth: 680 }}>
-      {assignments.map(a => (
-        <button
-          key={a.id}
-          type="button"
-          onClick={() => onSelect(a)}
+  // Split into active (not yet reviewed) and finished (published)
+  const active   = assignments.filter(a => a.status !== 'published')
+  const finished = assignments.filter(a => a.status === 'published')
+
+  function renderCard(a: AssignedQuizWithQuiz) {
+    return (
+      <button
+        key={a.id}
+        type="button"
+        onClick={() => onSelect(a)}
+        style={{
+          textAlign: 'left', padding: 0, border: 'none',
+          background: 'none', cursor: 'pointer',
+          fontFamily: 'var(--font-sans)',
+        }}
+      >
+        <div
+          className="card"
           style={{
-            textAlign: 'left', padding: 0, border: 'none',
-            background: 'none', cursor: 'pointer',
-            fontFamily: 'var(--font-sans)',
+            padding: '18px 20px',
+            display: 'flex', alignItems: 'center', gap: 16,
+            transition: 'box-shadow 150ms',
           }}
+          onMouseEnter={e => (e.currentTarget.style.boxShadow = '0 0 0 2px var(--color-accent)')}
+          onMouseLeave={e => (e.currentTarget.style.boxShadow = '')}
         >
-          <div
-            className="card"
-            style={{
-              padding: '18px 20px',
-              display: 'flex', alignItems: 'center', gap: 16,
-              transition: 'box-shadow 150ms',
-            }}
-            onMouseEnter={e => (e.currentTarget.style.boxShadow = '0 0 0 2px var(--color-accent)')}
-            onMouseLeave={e => (e.currentTarget.style.boxShadow = '')}
-          >
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--color-ink)', marginBottom: 4 }}>
-                {a.quiz.name}
-              </div>
-              {a.quiz.description && (
-                <div style={{
-                  fontSize: 12, color: 'var(--color-ink-muted)', lineHeight: 1.4,
-                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                }}>
-                  {a.quiz.description}
-                </div>
-              )}
-              <div style={{ fontSize: 11, color: 'var(--color-ink-muted)', marginTop: 6 }}>
-                Assigned {new Date(a.assigned_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
-                {a.completed_at && (
-                  <> &middot; Submitted {new Date(a.completed_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</>
-                )}
-              </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--color-ink)', marginBottom: 4 }}>
+              {a.quiz.name}
             </div>
-            <StatusBadge status={a.status} />
+            {a.quiz.description && (
+              <div style={{
+                fontSize: 12, color: 'var(--color-ink-muted)', lineHeight: 1.4,
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              }}>
+                {a.quiz.description}
+              </div>
+            )}
+            <div style={{ fontSize: 11, color: 'var(--color-ink-muted)', marginTop: 6 }}>
+              Assigned {new Date(a.assigned_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+              {a.completed_at && (
+                <> &middot; Submitted {new Date(a.completed_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</>
+              )}
+            </div>
           </div>
-        </button>
-      ))}
+          <StatusBadge status={a.status} />
+        </div>
+      </button>
+    )
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24, maxWidth: 680 }}>
+      {active.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {active.map(renderCard)}
+        </div>
+      )}
+
+      {finished.length > 0 && (
+        <div>
+          <div style={{
+            fontSize: 11, fontWeight: 600, color: 'var(--color-ink-muted)',
+            textTransform: 'uppercase', letterSpacing: '0.08em',
+            marginBottom: 10,
+          }}>
+            Finished
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {finished.map(renderCard)}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export default function InternQuizView() {
+// ─── Props ────────────────────────────────────────────────────────────────────
+
+interface InternQuizViewProps {
+  /**
+   * Called whenever the "in-progress unsubmitted quiz is open" state changes.
+   * true  = intern is actively answering an unsubmitted quiz
+   * false = list view, submitted view, or published result view
+   */
+  onActiveQuizChange?: (active: boolean) => void
+}
+
+export default function InternQuizView({ onActiveQuizChange }: InternQuizViewProps = {}) {
   const supabase = createClient()
 
   const [assignments, setAssignments] = useState<AssignedQuizWithQuiz[]>([])
@@ -523,12 +828,19 @@ export default function InternQuizView() {
     if (e) { setError(e.message); setLoading(false); return }
     // Drop any row where the quiz join came back null — this would only happen
     // if the RLS policy is missing or the quiz was deleted after assignment.
-    // Either way there is nothing to render for that row.
     setAssignments((data ?? []).filter((a): a is AssignedQuizWithQuiz => a.quiz !== null))
     setLoading(false)
   }, [supabase])
 
   useEffect(() => { load() }, [load])
+
+  // Notify the parent whenever the active-quiz state changes.
+  useEffect(() => {
+    const isActive = selected !== null
+      && selected.status !== 'submitted'
+      && selected.status !== 'published'
+    onActiveQuizChange?.(isActive)
+  }, [selected, onActiveQuizChange])
 
   // When returning from a detail, refresh the list so statuses are current.
   function handleBack() {
@@ -545,6 +857,9 @@ export default function InternQuizView() {
   }
 
   if (selected) {
+    if (selected.status === 'published') {
+      return <PublishedResultView assignment={selected} onBack={handleBack} />
+    }
     return <QuizDetail assignment={selected} onBack={handleBack} />
   }
 
