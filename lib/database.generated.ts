@@ -276,6 +276,54 @@ export type Database = {
           },
         ]
       }
+      user_questions: {
+        Row: {
+          id:             string
+          org_id:         string
+          user_id:        string
+          question:       string
+          category:       string
+          category_label: string
+          source_topic:   string | null
+          asked_at:       string
+        }
+        Insert: {
+          id?:             string
+          org_id:          string
+          user_id:         string
+          question:        string
+          category?:       string
+          category_label?: string
+          source_topic?:   string | null
+          asked_at?:       string
+        }
+        Update: {
+          id?:             string
+          org_id?:         string
+          user_id?:        string
+          question?:       string
+          category?:       string
+          category_label?: string
+          source_topic?:   string | null
+          asked_at?:       string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_questions_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "user_questions_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       job_role_quizzes: {
         Row: {
           job_role_id: string

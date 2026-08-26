@@ -37,6 +37,7 @@ export default async function ConsolePage() {
       userId={user!.id}
       fullName={(profile as Profile).full_name}
       orgName={org?.name ?? ''}
+      orgId={(profile as Profile).org_id}
     />
   )
 }

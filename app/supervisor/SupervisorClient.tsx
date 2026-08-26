@@ -199,12 +199,13 @@ export default function SupervisorClient({
       profile={profile}
       role="supervisor"
       company={orgName}
+      userId={supervisorId}
+      orgId={orgId}
       onSignOut={handleSignOut}
       roster={roster}
       onInvite={handleInvite}
       email={supervisorEmail}
       internCount={roster.length}
-      orgId={orgId}
       demoContent={DEMO_CONTENT_ENABLED}
     />
   )

@@ -26,6 +26,8 @@ export type QuizQuestion     = Database['public']['Tables']['quiz_questions']['R
 export type QuizAssignment   = Database['public']['Tables']['quiz_assignments']['Row']
 export type QuizAnswer       = Database['public']['Tables']['quiz_answers']['Row']
 export type JobRoleQuiz      = Database['public']['Tables']['job_role_quizzes']['Row']
+export type UserQuestion     = Database['public']['Tables']['user_questions']['Row']
+export type UserQuestionInsert = Database['public']['Tables']['user_questions']['Insert']
 
 export type ProfileInsert         = Database['public']['Tables']['profiles']['Insert']
 export type ProfileUpdate         = Database['public']['Tables']['profiles']['Update']

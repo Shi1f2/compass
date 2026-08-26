@@ -25,10 +25,11 @@ import SupervisorProfilePage from './SupervisorProfilePage'
 import ReportPanel, { type ExportConfig } from './ReportPanel'
 import PdfPreview from '../pdf/PdfPreview'
 import InternQuizView from './InternQuizView'
+import QuestionHeatmap from './QuestionHeatmap'
 
 // ─── Mode type ────────────────────────────────────────────────────────────────
 
-type Mode = 'mentor' | 'profile' | 'supervisor' | 'tasks' | 'quizzes'
+type Mode = 'mentor' | 'profile' | 'supervisor' | 'tasks' | 'quizzes' | 'heatmap'
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 
@@ -37,6 +38,10 @@ interface ConsoleShellProps {
   role:       Role
   company:    string
   onSignOut:  () => void
+  /** Authenticated user's DB UUID — used to log questions. */
+  userId?:    string
+  /** Authenticated user's org UUID. */
+  orgId?:     string
   /** Supervisor only: real roster from the DB. */
   roster?:    Starter[]
   /** Supervisor only: server action to send an invite. */
@@ -45,8 +50,6 @@ interface ConsoleShellProps {
   email?:     string
   /** Supervisor only: live count of interns under this supervisor. */
   internCount?: number
-  /** Supervisor only: org UUID — required to scope the quiz library. */
-  orgId?:       string
   /** When true, illustrative sample content is active. Shows a badge in the header. */
   demoContent?: boolean
 }
@@ -54,8 +57,8 @@ interface ConsoleShellProps {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function ConsoleShell({
-  profile, role, company, onSignOut, roster = [], onInvite, email = '', internCount = 0,
-  orgId = '', demoContent = false,
+  profile, role, company, onSignOut, userId = '', orgId = '', roster = [],
+  onInvite, email = '', internCount = 0, demoContent = false,
 }: ConsoleShellProps) {
   const isSupervisor = role === 'supervisor'
 
@@ -103,12 +106,26 @@ export default function ConsoleShell({
       const data = await res.json()
       if (!res.ok) throw new Error(data?.error || `Request failed (${res.status}).`)
       setSteps(Array.isArray(data.steps) ? data.steps : [])
+
+      // Fire-and-forget: log the question for supervisor heatmap.
+      // Only when the user has a real DB identity (userId + orgId are set).
+      if (userId && orgId) {
+        fetch('/api/log-question', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ question: q, userId, orgId }),
+        })
+          .then(r => r.json().then(d => {
+            if (!r.ok) console.error('[log-question] server error:', d)
+          }))
+          .catch(e => console.error('[log-question] network error:', e))
+      }
     } catch (err) {
       setAskError(err instanceof Error ? err.message : 'Something went wrong asking Compass.')
     } finally {
       setAsking(false)
     }
-  }, [persona])
+  }, [persona, userId, orgId])
 
   // ── Pick topic directly (from profile strip) ──────────────────────────────
 
@@ -157,6 +174,7 @@ export default function ConsoleShell({
   const tabs: { id: Mode; label: string }[] = isSupervisor
     ? [
         { id: 'supervisor', label: 'Supervisor' },
+        { id: 'heatmap',    label: 'Heatmap'    },
         { id: 'profile',    label: persona.name },
       ]
     : [
@@ -333,6 +351,9 @@ export default function ConsoleShell({
         </div>
       )
     }
+    if (mode === 'heatmap') {
+      return <QuestionHeatmap orgId={orgId} />
+    }
     if (mode === 'supervisor') {
       return (
         <SupervisorPage
@@ -457,6 +478,7 @@ export default function ConsoleShell({
                 }
                 setMode(homeMode)
               }}
+              className="logo-home-link"
               style={{
                 display:        'inline-flex',
                 alignItems:     'center',
@@ -468,8 +490,6 @@ export default function ConsoleShell({
               }}
               onMouseEnter={e => { (e.currentTarget as HTMLAnchorElement).style.opacity = '0.75' }}
               onMouseLeave={e => { (e.currentTarget as HTMLAnchorElement).style.opacity = '1'    }}
-              onFocus    ={e => { (e.currentTarget as HTMLAnchorElement).style.outline = '2px solid var(--color-accent)' }}
-              onBlur     ={e => { (e.currentTarget as HTMLAnchorElement).style.outline = 'none' }}
             >
               <Lockup size="small" layout="inline" />
             </a>

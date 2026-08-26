@@ -62,11 +62,12 @@ interface ConsoleClientProps {
   userId:   string
   fullName: string
   orgName:  string
+  orgId:    string
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function ConsoleClient({ userId, fullName, orgName }: ConsoleClientProps) {
+export default function ConsoleClient({ userId, fullName, orgName, orgId }: ConsoleClientProps) {
   const router = useRouter()
 
   const [profile] = useState(() => {
@@ -161,6 +162,8 @@ export default function ConsoleClient({ userId, fullName, orgName }: ConsoleClie
       profile={profile}
       role="new-starter"
       company={orgName}
+      userId={userId}
+      orgId={orgId}
       onSignOut={handleSignOut}
       demoContent={DEMO_CONTENT_ENABLED}
     />
