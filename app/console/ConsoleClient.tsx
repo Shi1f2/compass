@@ -59,15 +59,16 @@ function markProcessingSeen(userId: string): void {
 // ─── Props ────────────────────────────────────────────────────────────────────
 
 interface ConsoleClientProps {
-  userId:   string
-  fullName: string
-  orgName:  string
-  orgId:    string
+  userId:      string
+  fullName:    string
+  orgName:     string
+  orgId:       string
+  progressPct: number
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function ConsoleClient({ userId, fullName, orgName, orgId }: ConsoleClientProps) {
+export default function ConsoleClient({ userId, fullName, orgName, orgId, progressPct }: ConsoleClientProps) {
   const router = useRouter()
 
   const [profile] = useState(() => {
@@ -166,6 +167,7 @@ export default function ConsoleClient({ userId, fullName, orgName, orgId }: Cons
       orgId={orgId}
       onSignOut={handleSignOut}
       demoContent={DEMO_CONTENT_ENABLED}
+      progressPct={progressPct}
     />
   )
 }

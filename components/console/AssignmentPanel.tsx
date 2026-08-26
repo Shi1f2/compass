@@ -31,10 +31,11 @@ import type { Quiz } from '@/lib/database.types'
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface AssignmentRow {
-  id:           string
-  status:       string
-  assigned_at:  string
-  completed_at: string | null
+  id:               string
+  status:           string
+  assigned_at:      string
+  completed_at:     string | null
+  overall_feedback: string | null
   quiz: {
     id:             string
     name:           string
@@ -144,7 +145,7 @@ export default function AssignmentPanel({ profileId, orgId }: AssignmentPanelPro
       supabase
         .from('quiz_assignments')
         .select(`
-          id, status, assigned_at, completed_at,
+          id, status, assigned_at, completed_at, overall_feedback,
           quiz:quizzes(
             id, name,
             question_count:quiz_questions(count)
@@ -179,10 +180,11 @@ export default function AssignmentPanel({ profileId, orgId }: AssignmentPanelPro
       // quiz may be an array (1:1 embed as array) or a single object
       const quizRaw = Array.isArray(a.quiz) ? a.quiz[0] : a.quiz
       return {
-        id:           a.id,
-        status:       a.status,
-        assigned_at:  a.assigned_at,
-        completed_at: a.completed_at,
+        id:               a.id,
+        status:           a.status,
+        assigned_at:      a.assigned_at,
+        completed_at:     a.completed_at,
+        overall_feedback: (a as unknown as { overall_feedback: string | null }).overall_feedback ?? null,
         quiz: {
           id:             quizRaw?.id ?? '',
           name:           quizRaw?.name ?? '',
@@ -428,7 +430,7 @@ export default function AssignmentPanel({ profileId, orgId }: AssignmentPanelPro
                       assignmentId:    a.id,
                       quizName:        a.quiz.name,
                       status:          a.status,
-                      overallFeedback: null,
+                      overallFeedback: a.overall_feedback,
                     })}
                     title={a.status === 'published' ? 'View published review' : 'Open scoring view'}
                     style={{

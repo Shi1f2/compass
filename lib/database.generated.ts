@@ -356,37 +356,40 @@ export type Database = {
       }
       quiz_answers: {
         Row: {
-          assignment_id:   string
-          created_at:      string
-          id:              string
-          question_id:     string
-          score:           number | null
-          scored_at:       string | null
-          scored_by:       string | null
-          selected_option: number | null
-          text_answer:     string | null
+          assignment_id:      string
+          created_at:         string
+          id:                 string
+          question_id:        string
+          score:              number | null
+          scored_at:          string | null
+          scored_by:          string | null
+          selected_option:    number | null
+          supervisor_comment: string | null
+          text_answer:        string | null
         }
         Insert: {
-          assignment_id:   string
-          created_at?:     string
-          id?:             string
-          question_id:     string
-          score?:          number | null
-          scored_at?:      string | null
-          scored_by?:      string | null
-          selected_option?: number | null
-          text_answer?:    string | null
+          assignment_id:      string
+          created_at?:        string
+          id?:                string
+          question_id:        string
+          score?:             number | null
+          scored_at?:         string | null
+          scored_by?:         string | null
+          selected_option?:   number | null
+          supervisor_comment?: string | null
+          text_answer?:       string | null
         }
         Update: {
-          assignment_id?:  string
-          created_at?:     string
-          id?:             string
-          question_id?:    string
-          score?:          number | null
-          scored_at?:      string | null
-          scored_by?:      string | null
-          selected_option?: number | null
-          text_answer?:    string | null
+          assignment_id?:     string
+          created_at?:        string
+          id?:                string
+          question_id?:       string
+          score?:             number | null
+          scored_at?:         string | null
+          scored_by?:         string | null
+          selected_option?:   number | null
+          supervisor_comment?: string | null
+          text_answer?:       string | null
         }
         Relationships: [
           {
@@ -573,24 +576,25 @@ export type Database = {
     Views: {
       intern_quiz_results: {
         Row: {
-          answer_id:        string
-          assignment_id:    string
-          completed_at:     string | null
-          correct_option:   number | null
-          kind:             string
-          model_answer:     string | null
-          options:          string[] | null
-          order_index:      number
-          overall_feedback: string | null
-          profile_id:       string
-          prompt:           string
-          published_at:     string | null
-          question_id:      string
-          score:            number | null
-          scored_at:        string | null
-          selected_option:  number | null
-          status:           string
-          text_answer:      string | null
+          answer_id:          string
+          assignment_id:      string
+          completed_at:       string | null
+          correct_option:     number | null
+          kind:               string
+          model_answer:       string | null
+          options:            string[] | null
+          order_index:        number
+          overall_feedback:   string | null
+          profile_id:         string
+          prompt:             string
+          published_at:       string | null
+          question_id:        string
+          score:              number | null
+          scored_at:          string | null
+          selected_option:    number | null
+          status:             string
+          supervisor_comment: string | null
+          text_answer:        string | null
         }
         Relationships: []
       }

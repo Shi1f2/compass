@@ -7,8 +7,9 @@
  */
 'use client'
 
-import { useCallback, useEffect, useMemo, useReducer, useState } from 'react'
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { LogOut, Sparkles } from 'lucide-react'
+import ProgressIndicator from './ProgressIndicator'
 import type { Profile, Role, Topic } from '@/lib/types'
 import InternTasks from './InternTasks'
 import type { Starter } from '@/lib/supervisorData'
@@ -20,7 +21,7 @@ import TopicDetail from './TopicDetail'
 import GuideAnswer from './GuideAnswer'
 import ProfileView from './ProfileView'
 import type { StripItem } from './ProgrammeStrip'
-import SupervisorPage from './SupervisorPage'
+import SupervisorPage, { type SupervisorPageHandle } from './SupervisorPage'
 import SupervisorProfilePage from './SupervisorProfilePage'
 import ReportPanel, { type ExportConfig } from './ReportPanel'
 import PdfPreview from '../pdf/PdfPreview'
@@ -52,19 +53,22 @@ interface ConsoleShellProps {
   internCount?: number
   /** When true, illustrative sample content is active. Shows a badge in the header. */
   demoContent?: boolean
+  /** New-starter only: combined onboarding progress (0–100) shown in the header. */
+  progressPct?: number
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function ConsoleShell({
   profile, role, company, onSignOut, userId = '', orgId = '', roster = [],
-  onInvite, email = '', internCount = 0, demoContent = false,
+  onInvite, email = '', internCount = 0, demoContent = false, progressPct = 0,
 }: ConsoleShellProps) {
   const isSupervisor = role === 'supervisor'
 
   const [state,    dispatch]    = useReducer(consoleReducer, profile, initConsoleState)
   const [mode,     setMode]     = useState<Mode>(isSupervisor ? 'supervisor' : 'mentor')
   const [quizActive, setQuizActive] = useState(false)
+  const supervisorPageRef = useRef<SupervisorPageHandle>(null)
   const [query,    setQuery]    = useState('')
   const [asking,   setAsking]   = useState(false)
   const [askError, setAskError] = useState<string | null>(null)
@@ -92,6 +96,7 @@ export default function ConsoleShell({
   const handleAsk = useCallback(async (q: string) => {
     // A live "Ask Compass" answer is rendered on its own — it is NOT forced into
     // a pre-authored topic, so no day/system/step chrome leaks in.
+    if (asking) return
     setQuery(q)
     setMode('mentor')
     setAskError(null)
@@ -125,7 +130,7 @@ export default function ConsoleShell({
     } finally {
       setAsking(false)
     }
-  }, [persona, userId, orgId])
+  }, [asking, persona, userId, orgId])
 
   // ── Pick topic directly (from profile strip) ──────────────────────────────
 
@@ -328,9 +333,14 @@ export default function ConsoleShell({
         </p>
         <button
           type="button"
+          disabled={asking}
           className="btn-secondary"
           onClick={() => handleAsk(query)}
-          style={{ marginTop: 4 }}
+          style={{
+            marginTop:  4,
+            opacity:    asking ? 0.45 : 1,
+            cursor:     asking ? 'not-allowed' : 'pointer',
+          }}
         >
           Try again
         </button>
@@ -357,6 +367,7 @@ export default function ConsoleShell({
     if (mode === 'supervisor') {
       return (
         <SupervisorPage
+          ref={supervisorPageRef}
           name={persona.name}
           company={company || state.profile.systemsMeta.workspaceName}
           orgId={orgId}
@@ -394,7 +405,7 @@ export default function ConsoleShell({
             overflowY:    'auto',
           }}
         >
-          <AskBar onAsk={handleAsk} />
+          <AskBar onAsk={handleAsk} asking={asking} />
         </aside>
 
         {/* Main area */}
@@ -465,8 +476,6 @@ export default function ConsoleShell({
               aria-label="Compass — go to home"
               onClick={e => {
                 e.preventDefault()
-                const homeMode: Mode = isSupervisor ? 'supervisor' : 'mentor'
-                if (mode === homeMode) return
                 if (
                   !isSupervisor
                   && quizActive
@@ -476,7 +485,17 @@ export default function ConsoleShell({
                 ) {
                   return
                 }
-                setMode(homeMode)
+                if (isSupervisor) {
+                  // Always reset the roster: clear search, deselect person, close invite dialog.
+                  supervisorPageRef.current?.resetToRoster()
+                  setMode('supervisor')
+                } else {
+                  // Return the mentor panel to its landing state.
+                  setQuery('')
+                  setSteps(null)
+                  setAskError(null)
+                  setMode('mentor')
+                }
               }}
               className="logo-home-link"
               style={{
@@ -522,6 +541,9 @@ export default function ConsoleShell({
               marginLeft:     'auto',
             }}
           >
+            {!isSupervisor && (
+              <ProgressIndicator pct={progressPct} />
+            )}
             {demoContent && (
               <span
                 style={{

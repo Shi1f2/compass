@@ -8,48 +8,17 @@
 import { FormEvent, useState } from 'react'
 import { Search } from 'lucide-react'
 
-const SUGGESTIONS = [
-  'Laptop setup',
-  'Time off',
-  'Expenses',
-  'VPN access',
-  'Benefits',
-  'Who do I ask?',
-]
-
-// Chip tones cycle every 3 by index
-const CHIP_TONES = [
-  {
-    bg:    'var(--color-violet-soft)',
-    text:  'var(--color-violet)',
-    hoverBg:   'var(--color-violet)',
-    hoverText: '#fff',
-  },
-  {
-    bg:    'var(--color-yellow-soft)',
-    text:  'var(--color-waiting)',
-    hoverBg:   'var(--color-yellow)',
-    hoverText: 'var(--color-ink)',
-  },
-  {
-    bg:    'var(--color-accent-soft)',
-    text:  'var(--color-accent)',
-    hoverBg:   'var(--color-accent)',
-    hoverText: '#fff',
-  },
-]
-
 interface AskBarProps {
-  onAsk: (query: string) => void
+  onAsk:   (query: string) => void
+  asking?: boolean
 }
 
-export default function AskBar({ onAsk }: AskBarProps) {
+export default function AskBar({ onAsk, asking = false }: AskBarProps) {
   const [value, setValue] = useState('')
-  const [hoveredChip, setHoveredChip] = useState<number | null>(null)
 
   const submit = (q: string) => {
     const trimmed = q.trim()
-    if (!trimmed) return
+    if (!trimmed || asking) return
     setValue(trimmed)
     onAsk(trimmed)
   }
@@ -64,8 +33,8 @@ export default function AskBar({ onAsk }: AskBarProps) {
       {/* Header */}
       <div
         style={{
-          padding:       '24px 28px 12px',
-          flexShrink:    0,
+          padding:    '24px 28px 12px',
+          flexShrink: 0,
         }}
       >
         <span className="section-label">Ask Compass</span>
@@ -114,53 +83,20 @@ export default function AskBar({ onAsk }: AskBarProps) {
           `}</style>
           <button
             type="submit"
+            disabled={asking}
             className="btn-primary"
-            style={{ width: '100%', marginTop: 12 }}
+            style={{
+              width:      '100%',
+              marginTop:  12,
+              opacity:    asking ? 0.45 : 1,
+              cursor:     asking ? 'not-allowed' : 'pointer',
+              color:      asking ? 'var(--color-ink-muted)' : undefined,
+              background: asking ? 'var(--color-sunk)'      : undefined,
+            }}
           >
-            Ask
+            {asking ? 'Asking…' : 'Ask'}
           </button>
         </form>
-      </div>
-
-      {/* Suggestions */}
-      <div style={{ padding: '0 28px', flexShrink: 0 }}>
-        <span className="section-label">Try asking about</span>
-        <div
-          style={{
-            display:   'flex',
-            flexWrap:  'wrap',
-            gap:       8,
-            marginTop: 12,
-          }}
-        >
-          {SUGGESTIONS.map((s, i) => {
-            const tone    = CHIP_TONES[i % 3]!
-            const hovered = hoveredChip === i
-            return (
-              <button
-                key={s}
-                type="button"
-                onClick={() => submit(s)}
-                onMouseEnter={() => setHoveredChip(i)}
-                onMouseLeave={() => setHoveredChip(null)}
-                style={{
-                  padding:       '6px 14px',
-                  borderRadius:  9999,
-                  border:        'none',
-                  cursor:        'pointer',
-                  fontSize:      12,
-                  fontWeight:    500,
-                  background:    hovered ? tone.hoverBg   : tone.bg,
-                  color:         hovered ? tone.hoverText : tone.text,
-                  transition:    'background 150ms, color 150ms',
-                  fontFamily:    'var(--font-sans)',
-                }}
-              >
-                {s}
-              </button>
-            )
-          })}
-        </div>
       </div>
     </div>
   )

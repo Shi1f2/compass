@@ -181,3 +181,39 @@ The supervisor can then sign in at `/login` with their company email and the OTP
 ### Inviting interns
 
 Once a supervisor is signed in, they use the **Invite new starter** button in the supervisor console. The server action verifies the caller's role from their JWT, checks that the invited address matches the organisation domain, creates the auth user, writes the profile and invitation rows, and sends a magic-link email.
+
+### Seeding demonstration data
+
+The `seed-demo` script populates the supervisor dashboards with thirty fake new starters — fifteen in a Development team under one supervisor, fifteen in a Project Management team under another. It is safe to run more than once; it skips any person whose email already exists.
+
+Both supervisors must already exist in the database (created via `provision`). Pass their email addresses as flags:
+
+```bash
+npm run seed-demo -- \
+  --arda  "arda@example.com" \
+  --arman "arman@example.com"
+```
+
+The script:
+
+1. Confirms both supervisors exist, have the `supervisor` role, and belong to the same organisation. Aborts if anything is wrong.
+2. Creates (or reuses) a `Development` and a `Project Management` job role for the organisation.
+3. Creates (or reuses) ten task templates per role describing real onboarding steps.
+4. Creates (or reuses) two to three multiple-choice quizzes per role, attached to the job role so auto-assignment works.
+5. Creates thirty fake interns (email domain `@demo-seed.internal`). Accounts are email-confirmed immediately; no invitation emails are sent.
+6. Copies tasks from the role templates, marks a randomised proportion done with backdated timestamps.
+7. Assigns the role's quizzes to each starter and simulates a realistic spread of completion states: never started, partially answered, fully graded, and graded with supervisor feedback.
+8. Writes scattered `user_questions` rows so the supervisor heatmap is not blank.
+
+**Teardown** — to delete all fake starters (and everything they own) without touching the supervisors or shared quiz/role data:
+
+```bash
+npm run seed-demo -- \
+  --arda  "arda@example.com" \
+  --arman "arman@example.com" \
+  --teardown
+```
+
+Everything seeded under `@demo-seed.internal` is removed. Quizzes, job roles, and task templates are left intact.
+
+Requires `NEXT_PUBLIC_SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in `.env.local`.
