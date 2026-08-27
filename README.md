@@ -184,9 +184,11 @@ Once a supervisor is signed in, they use the **Invite new starter** button in th
 
 ### Seeding demonstration data
 
-The `seed-demo` script populates the supervisor dashboards with thirty fake new starters — fifteen in a Development team under one supervisor, fifteen in a Project Management team under another. It is safe to run more than once; it skips any person whose email already exists.
+The `seed-demo` script populates the supervisor dashboards with fake new starters — fifteen in a Development team under one supervisor, fifteen in a Project Management team under a second, and (optionally) fifteen more in a second Project Management team under a third. It is safe to run more than once; it skips any person whose email already exists.
 
-Both supervisors must already exist in the database (created via `provision`). Pass their email addresses as flags:
+All supervisors must already exist in the database (created via `provision`). Pass their email addresses as flags.
+
+**Two teams** (Development + Project Management):
 
 ```bash
 npm run seed-demo -- \
@@ -194,13 +196,24 @@ npm run seed-demo -- \
   --arman "arman@example.com"
 ```
 
+**Three teams** (Development + two Project Management teams sharing the same role, templates and quizzes):
+
+```bash
+npm run seed-demo -- \
+  --arda     "arda@example.com" \
+  --arman    "arman@example.com" \
+  --benjamin "benjamin@example.com"
+```
+
+`--benjamin` is optional. When it is absent the script behaves exactly as before and seeds only the two existing teams.
+
 The script:
 
-1. Confirms both supervisors exist, have the `supervisor` role, and belong to the same organisation. Aborts if anything is wrong.
+1. Confirms all provided supervisors exist, have the `supervisor` role, and belong to the same organisation. Aborts if anything is wrong.
 2. Creates (or reuses) a `Development` and a `Project Management` job role for the organisation.
 3. Creates (or reuses) ten task templates per role describing real onboarding steps.
-4. Creates (or reuses) two to three multiple-choice quizzes per role, attached to the job role so auto-assignment works.
-5. Creates thirty fake interns (email domain `@demo-seed.internal`). Accounts are email-confirmed immediately; no invitation emails are sent.
+4. Creates (or reuses) two to three multiple-choice quizzes per role, attached to the job role so auto-assignment works. The third team reuses the existing Project Management role, templates, and quizzes — no duplicates are created.
+5. Creates fifteen fake interns per supervisor (email domain `@demo-seed.internal`). Accounts are email-confirmed immediately; no invitation emails are sent.
 6. Copies tasks from the role templates, marks a randomised proportion done with backdated timestamps.
 7. Assigns the role's quizzes to each starter and simulates a realistic spread of completion states: never started, partially answered, fully graded, and graded with supervisor feedback.
 8. Writes scattered `user_questions` rows so the supervisor heatmap is not blank.
@@ -213,6 +226,8 @@ npm run seed-demo -- \
   --arman "arman@example.com" \
   --teardown
 ```
+
+Teardown matches solely on the `@demo-seed.internal` email domain, so it removes every seeded starter regardless of which supervisor owns them — whether you seeded two teams or three, the same command cleans everything up.
 
 Everything seeded under `@demo-seed.internal` is removed. Quizzes, job roles, and task templates are left intact.
 

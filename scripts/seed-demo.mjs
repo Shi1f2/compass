@@ -1,28 +1,35 @@
 #!/usr/bin/env node
 /**
  * scripts/seed-demo.mjs
- * Seeds thirty fake new starters across two real supervisors so the demo
- * supervisor dashboards look alive.
+ * Seeds up to forty-five fake new starters across up to three real supervisors
+ * so the demo supervisor dashboards look alive.
  *
- * Usage (seed):
+ * Usage (seed — two teams):
  *   npm run seed-demo -- --arda "arda@example.com" --arman "arman@example.com"
+ *
+ * Usage (seed — three teams):
+ *   npm run seed-demo -- --arda "arda@example.com" --arman "arman@example.com" --benjamin "benjamin@example.com"
  *
  * Usage (teardown — deletes everything created by this script):
  *   npm run seed-demo -- --arda "arda@example.com" --arman "arman@example.com" --teardown
  *
  * Flags:
  *   --arda    <email>   Email of the supervisor who owns the Development team
- *   --arman   <email>   Email of the supervisor who owns the Project Management team
+ *   --arman   <email>   Email of the supervisor who owns the first Project Management team
+ *   --benjamin <email>   (Optional) Email of the supervisor who owns the second Project
+ *                       Management team. When omitted only the two existing teams are seeded.
  *   --teardown          Delete all fake starters (matched by the FAKE_DOMAIN
  *                       constant below) and everything they own, then exit.
  *
  * What it does (seed):
- *  1. Looks up both supervisors; aborts if either is missing, wrong role,
- *     or they are in different organisations.
+ *  1. Looks up all provided supervisors; aborts if any is missing, wrong role,
+ *     or not in the same organisation as the others.
  *  2. Ensures a "Development" and a "Project Management" job role exist for
  *     the org (idempotent).
  *  3. Ensures task templates exist for each role (idempotent).
- *  4. Ensures a quiz library exists for each role (idempotent).
+ *  4. Ensures a quiz library exists for each role (idempotent). The third team
+ *     reuses the Project Management role, its templates, and its quizzes — no
+ *     duplicates are created.
  *  5. Creates 15 fake interns per supervisor (skips any whose email already
  *     exists in auth.users — safe to re-run).
  *  6. For each new intern: copies tasks from their role's templates, marks
@@ -69,6 +76,7 @@ const { values } = parseArgs({
   options: {
     arda:      { type: 'string' },
     arman:     { type: 'string' },
+    benjamin:  { type: 'string' },
     teardown:  { type: 'boolean', default: false },
   },
 })
@@ -77,8 +85,9 @@ if (!values.arda || !values.arman) {
   console.error([
     'Error: --arda and --arman are required.',
     '',
-    'Seed:     npm run seed-demo -- --arda <email> --arman <email>',
-    'Teardown: npm run seed-demo -- --arda <email> --arman <email> --teardown',
+    'Seed (two teams):   npm run seed-demo -- --arda <email> --arman <email>',
+    'Seed (three teams): npm run seed-demo -- --arda <email> --arman <email> --benjamin <email>',
+    'Teardown:           npm run seed-demo -- --arda <email> --arman <email> --teardown',
   ].join('\n'))
   process.exit(1)
 }
@@ -166,8 +175,34 @@ const PM_PEOPLE = [
   { first: 'Mia',       last: 'Johansson',  title: 'Project Manager',            start: -5  },
 ]
 
+const PM2_PEOPLE = [
+  { first: 'Darius',    last: 'Navarro',    title: 'Project Manager',            start: -88 },
+  { first: 'Ingrid',    last: 'Svensson',   title: 'Programme Coordinator',      start: -76 },
+  { first: 'Kwame',     last: 'Mensah',     title: 'Delivery Manager',           start: -64 },
+  { first: 'Valentina', last: 'Ricci',      title: 'Project Coordinator',        start: -56 },
+  { first: 'Marcus',    last: 'Okwu',       title: 'Project Manager',            start: -47 },
+  { first: 'Sofie',     last: 'Andersen',   title: 'Programme Manager',          start: -42 },
+  { first: 'Rafael',    last: 'Cardoso',    title: 'Delivery Manager',           start: -36 },
+  { first: 'Anneke',    last: 'Visser',     title: 'Project Coordinator',        start: -30 },
+  { first: 'Benson',    last: 'Kimani',     title: 'Project Manager',            start: -25 },
+  { first: 'Lena',      last: 'Hoffmann',   title: 'Programme Coordinator',      start: -21 },
+  { first: 'Tomás',     last: 'Varela',     title: 'Delivery Manager',           start: -16 },
+  { first: 'Chiara',    last: 'Gallo',      title: 'Project Manager',            start: -13 },
+  { first: 'Reuben',    last: 'Nakamura',   title: 'Programme Manager',          start: -9  },
+  { first: 'Fatou',     last: 'Camara',     title: 'Project Coordinator',        start: -6  },
+  { first: 'Aleksei',   last: 'Volkov',     title: 'Project Manager',            start: -3  },
+]
+
 function makeEmail(first, last) {
-  return `${first.toLowerCase()}.${last.toLowerCase()}${FAKE_DOMAIN}`
+  // NFD decompose so accents separate from their base letters, strip the
+  // combining marks (U+0300–U+036F), then drop anything that is not a plain
+  // lowercase letter or digit.  Names that contain only plain ASCII letters
+  // produce exactly the same address as before.
+  const norm = s => s.toLowerCase()
+                     .normalize('NFD')
+                     .replace(/[\u0300-\u036f]/g, '')
+                     .replace(/[^a-z0-9]/g, '')
+  return `${norm(first)}.${norm(last)}${FAKE_DOMAIN}`
 }
 
 function makeStartDate(offsetDays) {
@@ -710,10 +745,17 @@ const BUCKETS_PM = [
   'never', 'finished', 'partial', 'feedback', 'finished',
 ]
 
+const BUCKETS_PM2 = [
+  'partial', 'feedback', 'finished', 'never', 'partial',
+  'finished', 'feedback', 'never', 'finished', 'partial',
+  'feedback', 'partial', 'never', 'finished', 'feedback',
+]
+
 // Score profiles: probability of choosing the correct answer per person index
 // (0 = always wrong, 1 = always right). Mix strong, middling, weak.
-const SCORE_PROFILES_DEV = [0.9, 0.95, 0.7, 0.85, 0.6, 0.5, 0.9, 0.75, 0.4, 0.8, 0.65, 0.95, 0.55, 0.7, 0.85]
-const SCORE_PROFILES_PM  = [0.8, 0.6,  0.9, 0.45, 0.7, 0.95, 0.55, 0.85, 0.65, 0.9, 0.4, 0.75, 0.8, 0.5, 0.95]
+const SCORE_PROFILES_DEV  = [0.9, 0.95, 0.7, 0.85, 0.6, 0.5, 0.9, 0.75, 0.4, 0.8, 0.65, 0.95, 0.55, 0.7, 0.85]
+const SCORE_PROFILES_PM   = [0.8, 0.6,  0.9, 0.45, 0.7, 0.95, 0.55, 0.85, 0.65, 0.9, 0.4, 0.75, 0.8, 0.5, 0.95]
+const SCORE_PROFILES_PM2  = [0.5, 0.85, 0.65, 0.95, 0.4, 0.75, 0.9, 0.55, 0.8, 0.45, 0.95, 0.6, 0.7, 0.85, 0.5]
 
 // ─── 0. Teardown ──────────────────────────────────────────────────────────────
 
@@ -790,7 +832,17 @@ if (arda.orgId !== arman.orgId) {
 }
 
 const orgId = arda.orgId
-log(`✓ Both supervisors confirmed in org ${orgId}`)
+
+let benjamin = null
+if (values.benjamin) {
+  benjamin = await lookupSupervisor(values.benjamin, '--benjamin')
+  if (benjamin.orgId !== orgId) {
+    die(`--benjamin supervisor (${values.benjamin}) is in a different organisation (${benjamin.orgId} vs ${orgId}). All supervisors must share an org.`)
+  }
+}
+
+const supervisorCount = benjamin ? 3 : 2
+log(`✓ ${supervisorCount} supervisor(s) confirmed in org ${orgId}`)
 
 // ─── 2. Ensure job roles ──────────────────────────────────────────────────────
 
@@ -936,6 +988,7 @@ async function upsertQuizzes(roleId, roleName, supervisorId, quizDefs) {
 
 const devQuizIds = await upsertQuizzes(devRoleId, 'Development',        arda.id,  DEV_QUIZZES)
 const pmQuizIds  = await upsertQuizzes(pmRoleId,  'Project Management', arman.id, PM_QUIZZES)
+// pmQuizIds is reused for the third team — no new quizzes are created
 
 // Fetch all questions for each quiz bank so we can write answers later
 async function fetchQuizQuestions(quizIds) {
@@ -954,6 +1007,7 @@ async function fetchQuizQuestions(quizIds) {
 
 const devQuestions = await fetchQuizQuestions(devQuizIds)
 const pmQuestions  = await fetchQuizQuestions(pmQuizIds)
+// The third team shares the same PM questions
 
 // ─── 5. Create fake interns ────────────────────────────────────────────────────
 
@@ -1194,29 +1248,41 @@ const pmResult = await createInterns(
   BUCKETS_PM, SCORE_PROFILES_PM, 'Project Management',
 )
 
+let pm2Result = { created: 0, skipped: 0, assignmentsCreated: 0, answersCreated: 0 }
+if (benjamin) {
+  pm2Result = await createInterns(
+    PM2_PEOPLE, benjamin, pmRoleId, pmTemplates, pmQuizIds, pmQuestions,
+    BUCKETS_PM2, SCORE_PROFILES_PM2, 'Project Management',
+  )
+}
+
 // ─── Summary ──────────────────────────────────────────────────────────────────
 
-const totalCreated     = devResult.created     + pmResult.created
-const totalSkipped     = devResult.skipped     + pmResult.skipped
-const totalAssignments = devResult.assignmentsCreated + pmResult.assignmentsCreated
-const totalAnswers     = devResult.answersCreated     + pmResult.answersCreated
+const totalCreated     = devResult.created     + pmResult.created     + pm2Result.created
+const totalSkipped     = devResult.skipped     + pmResult.skipped     + pm2Result.skipped
+const totalAssignments = devResult.assignmentsCreated + pmResult.assignmentsCreated + pm2Result.assignmentsCreated
+const totalAnswers     = devResult.answersCreated     + pmResult.answersCreated     + pm2Result.answersCreated
+
+const pm2Line = benjamin
+  ? ` / ${pm2Result.created} PM-2`
+  : ''
 
 console.log(`
 ─────────────────────────────────────────────────────
 Seed complete.
 
-  New starters created : ${totalCreated}  (${devResult.created} dev / ${pmResult.created} PM)
+  New starters created : ${totalCreated}  (${devResult.created} dev / ${pmResult.created} PM${pm2Line})
   Already existed      : ${totalSkipped}  (skipped)
   Quiz assignments     : ${totalAssignments}
   Quiz answers written : ${totalAnswers}
 
   Dev quizzes   : ${devQuizIds.length}  (linked to "Development" role)
-  PM quizzes    : ${pmQuizIds.length}  (linked to "Project Management" role)
+  PM quizzes    : ${pmQuizIds.length}  (linked to "Project Management" role, shared by all PM teams)
 
   Fake domain   : ${FAKE_DOMAIN}
   Org ID        : ${orgId}
 
 To tear down all fake starters:
-  npm run seed-demo -- --arda "${values.arda}" --arman "${values.arman}" --teardown
+  npm run seed-demo -- --arda "${values.arda}" --arman "${values.arman}"${values.benjamin ? ` --benjamin "${values.benjamin}"` : ''} --teardown
 ─────────────────────────────────────────────────────
 `)
