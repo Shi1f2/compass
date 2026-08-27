@@ -7,7 +7,7 @@
  * Uses @supabase/ssr createServerClient with request/response cookies
  * as documented at https://supabase.com/docs/guides/auth/server-side/nextjs
  */
-import { createServerClient, type CookieOptions } from '@supabase/ssr'
+import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 import type { CleanDatabase } from '@/lib/database.types'
 
@@ -22,7 +22,7 @@ export async function middleware(request: NextRequest) {
         getAll() {
           return request.cookies.getAll()
         },
-        setAll(cookiesToSet: { name: string; value: string; options: CookieOptions }[], headers?: Record<string, string>) {
+        setAll(cookiesToSet) {
           cookiesToSet.forEach(({ name, value }) =>
             request.cookies.set(name, value),
           )
@@ -30,11 +30,6 @@ export async function middleware(request: NextRequest) {
           cookiesToSet.forEach(({ name, value, options }) =>
             supabaseResponse.cookies.set(name, value, options),
           )
-          if (headers) {
-            Object.entries(headers).forEach(([key, value]) =>
-              supabaseResponse.headers.set(key, value),
-            )
-          }
         },
       },
     },
