@@ -1,6 +1,22 @@
 {
   "title": "YouTube",
   "description": "Using YouTube: accounts and sign-in, the interface and buttons, watching videos, subtitles, uploading, downloads, playlists and settings.",
+
+  "defaultPageUrl": "https://www.youtube.com",
+
+  "pageUrls": {
+    "upload":   "https://studio.youtube.com",
+    "studio":   "https://studio.youtube.com",
+    "signin":   "https://accounts.google.com/ServiceLogin?service=youtube",
+    "watch":    "https://www.youtube.com",
+    "download": "https://www.youtube.com",
+    "playlist": "https://www.youtube.com/feed/library",
+    "settings": "https://www.youtube.com/account",
+    "premium":  "https://www.youtube.com/premium",
+    "shorts":   "https://www.youtube.com/shorts",
+    "live":     "https://studio.youtube.com/channel/UC/livestreaming"
+  },
+
   "images": [
     {
       "id": "signin-home",

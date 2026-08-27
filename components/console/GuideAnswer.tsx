@@ -1,13 +1,13 @@
 /**
  * components/console/GuideAnswer.tsx
  * Renders a live "Ask Compass" answer as ordered steps. Each step is one line of
- * text; if the model chose a screenshot for that step, it sits directly under
- * the text — so the words and the picture always stay together.
+ * text; if the model chose a screenshot for that step it sits directly under the
+ * text. Every step also shows an "Open page →" link when a url is present.
  */
 'use client'
 
 import { useState } from 'react'
-import { FileDown, RefreshCw } from 'lucide-react'
+import { FileDown, RefreshCw, ExternalLink } from 'lucide-react'
 import type { AnswerStep } from '@/lib/guideTypes'
 
 // Render **bold** inline; everything else is plain text.
@@ -19,12 +19,13 @@ function renderInline(text: string) {
   )
 }
 
-function StepCard({ step, index }: { step: AnswerStep; index: number }) {
+function StepCard({ step, index, showUrl }: { step: AnswerStep; index: number; showUrl: boolean }) {
   const [broken, setBroken] = useState(false)
   const showImage = step.image && !broken
 
   return (
     <div className="card" style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 14 }}>
+      {/* Step number + text */}
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
         <div
           style={{
@@ -40,6 +41,8 @@ function StepCard({ step, index }: { step: AnswerStep; index: number }) {
           {renderInline(step.text)}
         </p>
       </div>
+
+      {/* Static screenshot */}
       {showImage && (
         <div style={{ borderRadius: 12, border: '1px solid var(--color-border)', overflow: 'hidden' }}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -50,6 +53,28 @@ function StepCard({ step, index }: { step: AnswerStep; index: number }) {
             style={{ display: 'block', width: '100%', height: 'auto' }}
           />
         </div>
+      )}
+
+      {/* Link — only on the first card that introduces this URL, or when URL changes */}
+      {showUrl && step.url && (
+        <a
+          href={step.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{
+            display:        'inline-flex',
+            alignItems:     'center',
+            gap:            6,
+            fontSize:       12,
+            fontWeight:     500,
+            color:          'var(--color-accent)',
+            textDecoration: 'none',
+            alignSelf:      'flex-start',
+          }}
+        >
+          <ExternalLink size={13} />
+          {step.url}
+        </a>
       )}
     </div>
   )
@@ -72,9 +97,13 @@ export default function GuideAnswer({ query, steps, onReport, onAskAgain }: Guid
           {query}
         </h2>
 
-        {/* Steps: text + its screenshot together */}
+        {/* Steps — show the URL link only when it first appears or changes */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          {steps.map((s, i) => <StepCard key={i} step={s} index={i} />)}
+          {steps.map((s, i) => {
+            const prevUrl = i > 0 ? steps[i - 1]!.url : undefined
+            const showUrl = !!s.url && s.url !== prevUrl
+            return <StepCard key={i} step={s} index={i} showUrl={showUrl} />
+          })}
         </div>
 
         {/* Actions */}

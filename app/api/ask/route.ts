@@ -6,13 +6,16 @@
  * that topic's screenshots (id + description). It analyses the question, answers
  * from the guides, and returns ordered steps where each step may name the image
  * id that illustrates it. We resolve those ids to real image URLs and return
- * { steps: [{ text, image? }] }.
+ * { steps: [{ text, image?, url? }] }.
+ *
+ * Steps with no static image get a url from the topic's pageUrls map so the
+ * user can open the relevant page themselves.
  *
  * Uses watsonx.ai inference API. Required .env vars:
- *   WATSONX_API_KEY   — IBM Cloud API key
+ *   WATSONX_API_KEY    — IBM Cloud API key
  *   WATSONX_PROJECT_ID — watsonx project ID
  *   WATSONX_URL        — regional base URL, e.g. https://eu-gb.ml.cloud.ibm.com
- *   WATSONX_MODEL      — optional, defaults to ibm/granite-3-3-8b-instruct
+ *   WATSONX_MODEL      — optional, defaults to meta-llama/llama-3-3-70b-instruct
  */
 import { NextResponse } from 'next/server'
 import { readFileSync, readdirSync, existsSync } from 'fs'
@@ -31,18 +34,20 @@ interface AskBody {
   persona?: PersonaContext
 }
 
-// ─── Knowledge topics ───────────────────────────────────────────────────────
+// ─── Knowledge topics ─────────────────────────────────────────────────────────
 // One folder per topic under /knowledge, e.g. knowledge/youtube/. Each has any
 // number of .md guide files (context) and an optional manifest.json listing its
 // screenshots. Read fresh each request so edits need no restart.
 
 interface TopicImage { id: string; file: string; alt: string }
 interface Topic {
-  slug:        string
-  title:       string
-  description: string
-  guide:       string
-  images:      TopicImage[]
+  slug:           string
+  title:          string
+  description:    string
+  guide:          string
+  images:         TopicImage[]
+  defaultPageUrl: string | null
+  pageUrls:       Record<string, string>
 }
 
 const KNOWLEDGE_DIR = join(process.cwd(), 'knowledge')
@@ -69,21 +74,25 @@ function loadTopics(): Topic[] {
       .filter(Boolean)
       .join('\n\n')
 
-    // Image catalog from manifest.json (optional).
+    // Image catalog + page URLs from manifest.json (optional).
     let title = slug, description = '', images: TopicImage[] = []
+    let defaultPageUrl: string | null = null
+    let pageUrls: Record<string, string> = {}
     const manifestPath = join(dir, 'manifest.json')
     if (existsSync(manifestPath)) {
       try {
         const m = JSON.parse(readFileSync(manifestPath, 'utf8'))
-        title       = m.title       ?? slug
-        description  = m.description ?? ''
+        title          = m.title          ?? slug
+        description    = m.description    ?? ''
+        defaultPageUrl = m.defaultPageUrl ?? null
+        pageUrls       = (m.pageUrls && typeof m.pageUrls === 'object') ? m.pageUrls : {}
         images = Array.isArray(m.images)
           ? m.images.filter((i: TopicImage) => i && i.id && i.file)
           : []
       } catch { /* ignore malformed manifest */ }
     }
 
-    if (guide || images.length) topics.push({ slug, title, description, guide, images })
+    if (guide || images.length) topics.push({ slug, title, description, guide, images, defaultPageUrl, pageUrls })
   }
   return topics
 }
@@ -120,12 +129,11 @@ function buildSystemPrompt(topics: Topic[], persona: PersonaContext = {}): strin
     'answer using only that material — exact button names, menu paths and steps.',
     'If the guides do not cover it, say so instead of inventing details.',
     '',
-    'Return your answer as an ordered list of short steps. For any step that one',
-    'of the AVAILABLE SCREENSHOTS clearly illustrates, set imageId to that',
-    "screenshot's id (exactly as written in the catalog). If no screenshot fits a",
-    'step, set imageId to null. Only use ids from the catalog. Do not repeat the',
-    'same screenshot on multiple steps. Keep each step to one or two sentences and',
-    'do not use markdown headings or bullet symbols.',
+    'Return your answer as an ordered list of short steps.',
+    'For each step, if one of the AVAILABLE SCREENSHOTS clearly illustrates it,',
+    'set "imageId" to that screenshot\'s id exactly as listed. Otherwise set "imageId" to null.',
+    'Only use ids from the catalog. Do not repeat the same id on multiple steps.',
+    'Keep each step to one or two sentences. No markdown headings or bullet symbols.',
     '',
     'You MUST respond with ONLY a raw JSON object — no markdown, no code fences,',
     'no explanation, no text before or after. The JSON must have this exact shape:',
@@ -143,9 +151,22 @@ function buildSystemPrompt(topics: Topic[], persona: PersonaContext = {}): strin
   ].join('\n')
 }
 
+// ─── URL picker ───────────────────────────────────────────────────────────────
+// Returns the best URL for a step by matching keywords in the step text + query
+// against the topic's pageUrls map. Falls back to defaultPageUrl.
+
+function pickUrlForStep(topic: Topic, stepText: string, userQuery: string): string | null {
+  const haystack = (stepText + ' ' + userQuery).toLowerCase()
+  for (const [key, url] of Object.entries(topic.pageUrls)) {
+    if (haystack.includes(key)) return url
+  }
+  return topic.defaultPageUrl
+}
+
+// ─── IAM token ────────────────────────────────────────────────────────────────
+
 const IAM_TOKEN_URL = 'https://iam.cloud.ibm.com/identity/token'
 
-// Exchange an IBM Cloud API key for a short-lived IAM bearer token.
 async function getIamToken(apiKey: string): Promise<string> {
   const res = await fetch(IAM_TOKEN_URL, {
     method: 'POST',
@@ -197,7 +218,7 @@ export async function POST(req: Request) {
 
   const topics = loadTopics()
 
-  // Map every catalog id -> resolvable image, for turning the model's picks into URLs.
+  // Map every catalog id → resolvable image URL.
   const imageById = new Map<string, { src: string; alt: string }>()
   for (const t of topics) {
     for (const img of t.images) {
@@ -208,8 +229,8 @@ export async function POST(req: Request) {
     }
   }
 
-  const model  = process.env.WATSONX_MODEL?.trim() || 'meta-llama/llama-3-3-70b-instruct'
-  const wxUrl  = `${baseUrl}/ml/v1/text/chat?version=2024-05-13`
+  const model = process.env.WATSONX_MODEL?.trim() || 'meta-llama/llama-3-3-70b-instruct'
+  const wxUrl = `${baseUrl}/ml/v1/text/chat?version=2024-05-13`
 
   let iamToken: string
   try {
@@ -256,23 +277,41 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'watsonx API returned no answer.' }, { status: 502 })
     }
 
-    // Extract JSON from the response — the model may wrap it in markdown code fences
+    // Extract JSON — model may wrap it in markdown code fences.
     const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/)
-    const jsonStr = jsonMatch ? jsonMatch[1].trim() : content.trim()
-    const parsed = JSON.parse(jsonStr) as { steps?: { text: string; imageId: string | null }[] }
+    const jsonStr   = jsonMatch ? jsonMatch[1].trim() : content.trim()
+    const parsed    = JSON.parse(jsonStr) as {
+      steps?: { text: string; imageId: string | null }[]
+    }
     const rawSteps = Array.isArray(parsed.steps) ? parsed.steps : []
 
-    // Resolve image ids -> URLs; drop unknown ids and de-duplicate images so the
-    // same screenshot never appears twice.
+    // Find which topic this query belongs to.
+    const matchedTopic =
+      topics.find(t => rawSteps.some(s => s.imageId?.startsWith(t.slug + ':'))) ??
+      topics.find(t => query.toLowerCase().includes(t.slug.toLowerCase()) ||
+                       query.toLowerCase().includes(t.title.toLowerCase())) ??
+      topics[0] ?? null
+
     const usedImages = new Set<string>()
+
     const steps: AnswerStep[] = rawSteps
       .filter(s => typeof s.text === 'string' && s.text.trim())
       .map(s => {
         const step: AnswerStep = { text: s.text.trim() }
+
+        // Static image from catalog — wins if available.
         if (s.imageId && imageById.has(s.imageId) && !usedImages.has(s.imageId)) {
           usedImages.add(s.imageId)
           step.image = imageById.get(s.imageId)
         }
+
+        // Link URL from the topic's pageUrls map — shown on every step so the
+        // user always has a direct link to the relevant page.
+        if (matchedTopic) {
+          const url = pickUrlForStep(matchedTopic, s.text, query)
+          if (url) step.url = url
+        }
+
         return step
       })
 
