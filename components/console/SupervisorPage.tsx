@@ -5,7 +5,7 @@
 'use client'
 
 import React, {
-  useCallback, useEffect, useRef, useState,
+  forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState,
 } from 'react'
 import {
   ArrowLeft, Check, GraduationCap,
@@ -14,7 +14,7 @@ import {
 import {
   PASS_THRESHOLD,
   answeredCount, averageScore,
-  taskPct, knowledgePct,
+  taskPct, quizPct, overallPct,
   type Starter,
 } from '@/lib/supervisorData'
 import { createClient } from '@/lib/supabase/client'
@@ -765,11 +765,12 @@ function InviteDialog({ onClose, onSent }: InviteDialogProps) {
 // ─── Starter card ─────────────────────────────────────────────────────────────
 
 function StarterCard({ starter, onClick }: { starter: Starter; onClick: () => void }) {
-  const avg   = averageScore(starter)
-  const tasks = taskPct(starter)
-  const know  = knowledgePct(starter)
-  const ans   = answeredCount(starter)
-  const totalQ = starter.quiz.length
+  const avg      = averageScore(starter)
+  const combined = overallPct(starter)
+  const tasks    = taskPct(starter)
+  const quizzes  = quizPct(starter)
+  const ans      = answeredCount(starter)
+  const totalQ   = starter.quizCounts.total
 
   return (
     <button
@@ -794,16 +795,19 @@ function StarterCard({ starter, onClick }: { starter: Starter; onClick: () => vo
         </div>
       </div>
 
-      {/* Bars */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <LabelledBar label="Tasks"     pct={tasks} color="var(--color-accent)" />
-        <LabelledBar label="Knowledge" pct={know}  color="var(--color-violet)" />
+      {/* Single combined progress bar */}
+      <LabelledBar label="Progress" pct={combined} color="var(--color-accent)" />
+
+      {/* Sub-bars */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 10 }}>
+        <LabelledBar label="Tasks"   pct={tasks}   color="var(--color-accent)" />
+        <LabelledBar label="Quizzes" pct={quizzes} color="var(--color-violet)" />
       </div>
 
       {/* Footer */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 20 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 16 }}>
         <span style={{ fontSize: 11, color: 'var(--color-ink-muted)', fontVariantNumeric: 'tabular-nums' }}>
-          {starter.taskDone}/{starter.taskTotal} tasks &middot; {ans}/{totalQ} Qs
+          {starter.taskDone}/{starter.taskTotal} tasks &middot; {ans}/{totalQ} quizzes
         </span>
         <ScoreLabel score={avg} />
       </div>
@@ -845,7 +849,10 @@ function HeaderStat({ label, value, tone = 'plain' }: { label: string; value: st
 
 function DetailView({ starter, onBack, orgId }: { starter: Starter; onBack: () => void; orgId: string }) {
   const [tab, setTab] = useState<'tasks' | 'knowledge'>('tasks')
-  const pct = taskPct(starter)
+  const pct      = overallPct(starter)
+  const avg      = averageScore(starter)
+  const qFinished = starter.quizCounts.finished
+  const qTotal    = starter.quizCounts.total
 
   // Escape goes back
   useEffect(() => {
@@ -856,6 +863,11 @@ function DetailView({ starter, onBack, orgId }: { starter: Starter; onBack: () =
 
   // Shared container: every row in this view aligns to the same column.
   const W: React.CSSProperties = { maxWidth: 1100, margin: '0 auto', padding: '0 24px', width: '100%' }
+
+  // Build quiz stat value: "0/3" or "2/3 · 84%"
+  const quizValue = avg !== null
+    ? `${qFinished}/${qTotal} · ${avg}%`
+    : `${qFinished}/${qTotal}`
 
   return (
     // Plain block — the parent thin-scroll wrapper owns all scrolling.
@@ -905,13 +917,14 @@ function DetailView({ starter, onBack, orgId }: { starter: Starter; onBack: () =
             </div>
           </div>
 
-          {/* Stats row — derived from real task counts */}
+          {/* Stats row — combined progress + per-stream breakdown */}
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'flex-start' }}>
             <HeaderStat label="Tasks"    value={`${starter.taskDone}/${starter.taskTotal}`} tone="violet" />
+            <HeaderStat label="Quizzes"  value={quizValue}                                  tone={avg !== null && avg >= PASS_THRESHOLD ? 'correct' : avg !== null ? 'yellow' : 'violet'} />
             <HeaderStat label="Progress" value={`${pct}%`}                                  tone="plain"  />
           </div>
 
-          {/* Progress track from real task counts */}
+          {/* Combined progress track */}
           <div className="track" style={{ width: '100%', height: 6, marginTop: 4 }}>
             <div className="track-fill" style={{ width: `${pct}%`, height: '100%' }} />
           </div>
@@ -959,6 +972,11 @@ function DetailView({ starter, onBack, orgId }: { starter: Starter; onBack: () =
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
+export interface SupervisorPageHandle {
+  /** Reset to the unfiltered roster with no person selected and no dialog open. */
+  resetToRoster(): void
+}
+
 interface SupervisorPageProps {
   name:    string
   company: string
@@ -969,11 +987,20 @@ interface SupervisorPageProps {
   onInvite: (email: string, jobRoleId: string) => Promise<string | null>
 }
 
-export default function SupervisorPage({ name, company, orgId, roster, onInvite }: SupervisorPageProps) {
+const SupervisorPage = forwardRef<SupervisorPageHandle, SupervisorPageProps>(
+function SupervisorPage({ name, company, orgId, roster, onInvite }, ref) {
   const [search,    setSearch]    = useState('')
   const [selected,  setSelected]  = useState<Starter | null>(null)
   const [invite,    setInvite]    = useState(false)
   const [confirm,   setConfirm]   = useState('')
+
+  useImperativeHandle(ref, () => ({
+    resetToRoster() {
+      setSelected(null)
+      setSearch('')
+      setInvite(false)
+    },
+  }))
 
   const filtered = roster.filter(s =>
     s.name.toLowerCase().includes(search.toLowerCase())
@@ -1092,4 +1119,6 @@ export default function SupervisorPage({ name, company, orgId, roster, onInvite 
       )}
     </div>
   )
-}
+})
+
+export default SupervisorPage

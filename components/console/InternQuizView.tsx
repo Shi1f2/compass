@@ -15,8 +15,9 @@
  */
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { ArrowLeft, ArrowRight, ChevronLeft, Clock } from 'lucide-react'
+import { useCallback, useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { ArrowLeft, ArrowRight, ChevronLeft } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { saveAnswer, submitQuiz } from '@/lib/intern-quiz-actions'
 
@@ -57,21 +58,22 @@ interface AnswerRow {
 
 // Rows returned by the security-definer view intern_quiz_results
 interface PublishedResultRow {
-  answer_id:        string
-  assignment_id:    string
-  overall_feedback: string | null
-  published_at:     string | null
-  question_id:      string
-  selected_option:  number | null
-  text_answer:      string | null
-  score:            number | null
-  scored_at:        string | null
-  kind:             string
-  prompt:           string
-  options:          string[] | null
-  correct_option:   number | null
-  model_answer:     string | null
-  order_index:      number
+  answer_id:         string
+  assignment_id:     string
+  overall_feedback:  string | null
+  published_at:      string | null
+  question_id:       string
+  selected_option:   number | null
+  text_answer:       string | null
+  score:             number | null
+  scored_at:         string | null
+  kind:              string
+  prompt:            string
+  options:           string[] | null
+  correct_option:    number | null
+  model_answer:      string | null
+  order_index:       number
+  supervisor_comment: string | null
 }
 
 // ─── Status badge ─────────────────────────────────────────────────────────────
@@ -162,94 +164,72 @@ function PublishedQuestionCard({ row, idx }: { row: PublishedResultRow; idx: num
         fontSize: 11, fontWeight: 600, color: 'var(--color-ink-muted)',
         textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 6,
       }}>
-        Q{idx + 1} &middot; {row.kind === 'multiple_choice' ? 'Multiple choice' : 'Open'}
+        Q{idx + 1} &middot; Multiple choice
       </div>
       <p style={{ margin: '0 0 16px', fontSize: 14, fontWeight: 500, color: 'var(--color-ink)', lineHeight: 1.5 }}>
         {row.prompt}
       </p>
 
-      {row.kind === 'multiple_choice' ? (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 }}>
-          {options.map((opt, i) => {
-            const isChosen  = row.selected_option === i
-            const isCorrect = row.correct_option  === i
-            const highlight =
-              isChosen && isCorrect  ? 'correct' :
-              isChosen && !isCorrect ? 'incorrect' :
-              isCorrect              ? 'correct-unselected' : 'neutral'
-            const styleMap: Record<string, { border: string; bg: string; color: string }> = {
-              correct:              { border: 'var(--color-correct)',   bg: 'var(--color-correct-soft)',   color: 'var(--color-correct)'   },
-              incorrect:            { border: 'var(--color-incorrect)', bg: 'var(--color-incorrect-soft)', color: 'var(--color-incorrect)' },
-              'correct-unselected': { border: 'var(--color-correct)',   bg: 'transparent',                 color: 'var(--color-correct)'   },
-              neutral:              { border: 'var(--color-border)',    bg: 'transparent',                 color: 'var(--color-ink-muted)' },
-            }
-            const s = styleMap[highlight]!
-            return (
-              <div
-                key={i}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 10,
-                  padding: '8px 12px', borderRadius: 8,
-                  border: `1.5px solid ${s.border}`,
-                  background: s.bg, fontSize: 13,
-                }}
-              >
-                <span style={{ fontWeight: 500, color: s.color, minWidth: 20 }}>
-                  {String.fromCharCode(65 + i)}.
-                </span>
-                <span style={{ flex: 1, color: 'var(--color-ink)' }}>{opt}</span>
-              </div>
-            )
-          })}
-          {row.selected_option === null && (
-            <p style={{ margin: 0, fontSize: 12, color: 'var(--color-ink-muted)', fontStyle: 'italic' }}>No answer selected</p>
-          )}
-        </div>
-      ) : (
-        <div>
-          {/* Intern's text answer */}
-          <div style={{
-            padding: '10px 12px', borderRadius: 8, marginBottom: 12,
-            background: 'var(--color-sunk)',
-            fontSize: 13, color: 'var(--color-ink)', lineHeight: 1.6,
-            whiteSpace: 'pre-wrap', wordBreak: 'break-word', minHeight: 44,
-          }}>
-            {row.text_answer?.trim()
-              ? row.text_answer
-              : <span style={{ color: 'var(--color-ink-muted)', fontStyle: 'italic' }}>No answer provided</span>
-            }
-          </div>
-
-          {/* Score bar */}
-          <div style={{ marginBottom: 12 }}>
-            <ScoreBar score={row.score} />
-          </div>
-
-          {/* Model answer */}
-          {row.model_answer?.trim() && (
-            <div style={{
-              padding: '10px 12px', borderRadius: 8,
-              background: 'var(--color-accent-soft)',
-              fontSize: 12, color: 'var(--color-ink)', lineHeight: 1.6,
-              whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-            }}>
-              <span style={{
-                display: 'block', fontSize: 10, fontWeight: 600,
-                color: 'var(--color-ink-muted)', textTransform: 'uppercase',
-                letterSpacing: '0.08em', marginBottom: 4,
-              }}>
-                Model answer
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 }}>
+        {options.map((opt, i) => {
+          const isChosen  = row.selected_option === i
+          const isCorrect = row.correct_option  === i
+          const highlight =
+            isChosen && isCorrect  ? 'correct' :
+            isChosen && !isCorrect ? 'incorrect' :
+            isCorrect              ? 'correct-unselected' : 'neutral'
+          const styleMap: Record<string, { border: string; bg: string; color: string }> = {
+            correct:              { border: 'var(--color-correct)',   bg: 'var(--color-correct-soft)',   color: 'var(--color-correct)'   },
+            incorrect:            { border: 'var(--color-incorrect)', bg: 'var(--color-incorrect-soft)', color: 'var(--color-incorrect)' },
+            'correct-unselected': { border: 'var(--color-correct)',   bg: 'transparent',                 color: 'var(--color-correct)'   },
+            neutral:              { border: 'var(--color-border)',    bg: 'transparent',                 color: 'var(--color-ink-muted)' },
+          }
+          const s = styleMap[highlight]!
+          return (
+            <div
+              key={i}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 10,
+                padding: '8px 12px', borderRadius: 8,
+                border: `1.5px solid ${s.border}`,
+                background: s.bg, fontSize: 13,
+              }}
+            >
+              <span style={{ fontWeight: 500, color: s.color, minWidth: 20 }}>
+                {String.fromCharCode(65 + i)}.
               </span>
-              {row.model_answer}
-            </div>
-          )}
+              <span style={{ flex: 1, color: 'var(--color-ink)' }}>{opt}</span>
+              </div>
+          )
+        })}
+        {row.selected_option === null && (
+          <p style={{ margin: 0, fontSize: 12, color: 'var(--color-ink-muted)', fontStyle: 'italic' }}>No answer selected</p>
+        )}
+      </div>
+
+      {/* Score */}
+      {row.score !== null && (
+        <div style={{ marginTop: 6 }}>
+          <ScoreBar score={row.score} />
         </div>
       )}
 
-      {/* Score for MC */}
-      {row.kind === 'multiple_choice' && row.score !== null && (
-        <div style={{ marginTop: 6 }}>
-          <ScoreBar score={row.score} />
+      {/* Supervisor comment */}
+      {row.supervisor_comment?.trim() && (
+        <div style={{
+          marginTop: 12, padding: '10px 12px', borderRadius: 8,
+          background: 'var(--color-accent-soft)',
+          fontSize: 12, color: 'var(--color-ink)', lineHeight: 1.6,
+          whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+        }}>
+          <span style={{
+            display: 'block', fontSize: 10, fontWeight: 600,
+            color: 'var(--color-ink-muted)', textTransform: 'uppercase',
+            letterSpacing: '0.08em', marginBottom: 4,
+          }}>
+            Supervisor note
+          </span>
+          {row.supervisor_comment}
         </div>
       )}
     </div>
@@ -392,6 +372,7 @@ function QuizDetail({
   assignment: AssignedQuizWithQuiz
   onBack:     () => void
 }) {
+  const router   = useRouter()
   const supabase = createClient()
 
   const [questions,   setQuestions]   = useState<QuestionRow[]>([])
@@ -403,7 +384,6 @@ function QuizDetail({
   const [saveError,   setSaveError]   = useState<string | null>(null)
   const [submitting,  setSubmitting]  = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
-  const [submitted,   setSubmitted]   = useState(assignment.status === 'submitted')
 
   // ── Load questions + existing answers ──────────────────────────────────────
 
@@ -442,49 +422,30 @@ function QuizDetail({
     return () => { cancelled = true }
   }, [assignment.id, assignment.quiz.id, supabase])
 
-  // ── Auto-save ─────────────────────────────────────────────────────────────
-  // Debounced for open text; immediate for MC.
-
-  const openSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // ── Auto-save (MC only) ───────────────────────────────────────────────────
 
   const persistAnswer = useCallback(async (
     questionId:     string,
     selectedOption: number | null,
-    textAnswer:     string | null,
   ) => {
     setSaving(true)
     setSaveError(null)
-    const { error } = await saveAnswer(assignment.id, questionId, selectedOption, textAnswer)
+    const { error } = await saveAnswer(assignment.id, questionId, selectedOption, null)
     setSaving(false)
     if (error) setSaveError(error)
   }, [assignment.id])
 
   function handleMcChoice(questionId: string, optionIdx: number) {
-    if (submitted) return
     setAnswers(prev => {
       const next = new Map(prev)
       next.set(questionId, { question_id: questionId, selected_option: optionIdx, text_answer: null, score: null })
       return next
     })
     setSaveError(null)
-    persistAnswer(questionId, optionIdx, null)
+    persistAnswer(questionId, optionIdx)
   }
 
-  function handleOpenChange(questionId: string, text: string) {
-    if (submitted) return
-    setAnswers(prev => {
-      const next = new Map(prev)
-      next.set(questionId, { question_id: questionId, selected_option: null, text_answer: text, score: null })
-      return next
-    })
-    setSaveError(null)
-    if (openSaveTimer.current) clearTimeout(openSaveTimer.current)
-    openSaveTimer.current = setTimeout(() => {
-      persistAnswer(questionId, null, text)
-    }, 800)
-  }
-
-  // ── Submit ────────────────────────────────────────────────────────────────
+  // ── Submit (auto-publish) ─────────────────────────────────────────────────
 
   async function handleSubmit() {
     setSubmitting(true)
@@ -492,7 +453,13 @@ function QuizDetail({
     const { error } = await submitQuiz(assignment.id)
     setSubmitting(false)
     if (error) { setSubmitError(error); return }
-    setSubmitted(true)
+    // submitQuiz sets status='published' immediately. Navigate back so the
+    // parent reloads the assignment list; the published status will route the
+    // intern straight to PublishedResultView on re-select.
+    // router.refresh() triggers a Next.js RSC re-render so the server-computed
+    // progressPct (revalidated by the action) flows back to the header bar.
+    router.refresh()
+    onBack()
   }
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -501,7 +468,6 @@ function QuizDetail({
   const answer   = question ? answers.get(question.id) : undefined
   const isLast   = currentIdx === questions.length - 1
   const isFirst  = currentIdx === 0
-
   if (loading) {
     return <p style={{ padding: '32px 0', fontSize: 13, color: 'var(--color-ink-muted)' }}>Loading…</p>
   }
@@ -532,7 +498,7 @@ function QuizDetail({
           <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600, color: 'var(--color-ink)' }}>
             {assignment.quiz.name}
           </h2>
-          <StatusBadge status={submitted ? 'submitted' : assignment.status} />
+          <StatusBadge status={assignment.status} />
         </div>
         {assignment.quiz.description && (
           <p style={{ margin: '6px 0 0', fontSize: 13, color: 'var(--color-ink-muted)', lineHeight: 1.5 }}>
@@ -541,144 +507,109 @@ function QuizDetail({
         )}
       </div>
 
-      {/* Submitted state — waiting for supervisor review */}
-      {submitted ? (
-        <div className="card" style={{ padding: 28, textAlign: 'center' }}>
-          <Clock
-            size={36}
-            style={{ color: 'var(--color-waiting)', marginBottom: 12 }}
+      <>
+        {/* Progress */}
+        <div style={{ marginBottom: 20 }}>
+          <ProgressDots
+            total={questions.length}
+            current={currentIdx}
+            answers={answers}
+            questionIds={questions.map(q => q.id)}
           />
-          <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--color-ink)', marginBottom: 6 }}>
-            Submitted — waiting for review
+        </div>
+
+        {/* Question card */}
+        {question && (
+          <div className="card" style={{ padding: 28, marginBottom: 16 }}>
+            <p style={{ margin: '0 0 20px', fontSize: 15, fontWeight: 500, color: 'var(--color-ink)', lineHeight: 1.5 }}>
+              {question.prompt}
+            </p>
+
+            {question.options ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {question.options.map((opt, i) => {
+                  const isSelected = answer?.selected_option === i
+                  return (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() => handleMcChoice(question.id, i)}
+                      style={{
+                        textAlign: 'left', padding: '12px 16px', borderRadius: 10,
+                        border: `2px solid ${isSelected ? 'var(--color-accent)' : 'var(--color-border)'}`,
+                        cursor: 'pointer',
+                        background: isSelected ? 'var(--color-accent-soft)' : 'var(--color-surface)',
+                        fontSize: 13, color: 'var(--color-ink)',
+                        fontFamily: 'var(--font-sans)',
+                        transition: 'border-color 120ms, background 120ms',
+                      }}
+                    >
+                      <span style={{ fontWeight: 500, marginRight: 10, color: 'var(--color-ink-muted)' }}>
+                        {String.fromCharCode(65 + i)}.
+                      </span>
+                      {opt}
+                    </button>
+                  )
+                })}
+              </div>
+            ) : null}
+
+            {/* Save feedback */}
+            <div style={{ marginTop: 12, minHeight: 18, fontSize: 12 }}>
+              {saving    && <span style={{ color: 'var(--color-ink-muted)' }}>Saving…</span>}
+              {saveError && <span style={{ color: 'var(--color-incorrect)' }}>{saveError}</span>}
+            </div>
           </div>
-          <div style={{ fontSize: 13, color: 'var(--color-ink-muted)' }}>
-            Your answers have been recorded. Your supervisor will score and publish the results.
+        )}
+
+        {/* Navigation + submit */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+          <button
+            type="button"
+            disabled={isFirst}
+            onClick={() => setCurrentIdx(i => i - 1)}
+            className="btn-secondary"
+            style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, opacity: isFirst ? 0.4 : 1 }}
+          >
+            <ChevronLeft size={14} /> Previous
+          </button>
+
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+            {submitError && (
+              <span style={{ fontSize: 12, color: 'var(--color-incorrect)' }}>{submitError}</span>
+            )}
+
+            {isLast ? (
+              <button
+                type="button"
+                disabled={submitting}
+                onClick={handleSubmit}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  padding: '9px 20px', borderRadius: 9999,
+                  border: 'none', cursor: submitting ? 'default' : 'pointer',
+                  fontSize: 13, fontWeight: 600,
+                  background: 'var(--color-accent)', color: '#fff',
+                  fontFamily: 'var(--font-sans)',
+                  opacity: submitting ? 0.7 : 1,
+                  transition: 'opacity 150ms',
+                }}
+              >
+                {submitting ? 'Submitting…' : 'Submit quiz'}
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setCurrentIdx(i => i + 1)}
+                className="btn-secondary"
+                style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}
+              >
+                Next <ArrowRight size={14} />
+              </button>
+            )}
           </div>
         </div>
-      ) : (
-        <>
-          {/* Progress */}
-          <div style={{ marginBottom: 20 }}>
-            <ProgressDots
-              total={questions.length}
-              current={currentIdx}
-              answers={answers}
-              questionIds={questions.map(q => q.id)}
-            />
-          </div>
-
-          {/* Question card */}
-          {question && (
-            <div className="card" style={{ padding: 28, marginBottom: 16 }}>
-              <p style={{ margin: '0 0 20px', fontSize: 15, fontWeight: 500, color: 'var(--color-ink)', lineHeight: 1.5 }}>
-                {question.prompt}
-              </p>
-
-              {question.kind === 'multiple_choice' && question.options ? (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                  {question.options.map((opt, i) => {
-                    const isSelected = answer?.selected_option === i
-                    return (
-                      <button
-                        key={i}
-                        type="button"
-                        disabled={submitted}
-                        onClick={() => handleMcChoice(question.id, i)}
-                        style={{
-                          textAlign: 'left', padding: '12px 16px', borderRadius: 10,
-                          border: `2px solid ${isSelected ? 'var(--color-accent)' : 'var(--color-border)'}`,
-                          cursor: submitted ? 'default' : 'pointer',
-                          background: isSelected ? 'var(--color-accent-soft)' : 'var(--color-surface)',
-                          fontSize: 13, color: 'var(--color-ink)',
-                          fontFamily: 'var(--font-sans)',
-                          transition: 'border-color 120ms, background 120ms',
-                        }}
-                      >
-                        <span style={{ fontWeight: 500, marginRight: 10, color: 'var(--color-ink-muted)' }}>
-                          {String.fromCharCode(65 + i)}.
-                        </span>
-                        {opt}
-                      </button>
-                    )
-                  })}
-                </div>
-              ) : (
-                <textarea
-                  value={answer?.text_answer ?? ''}
-                  readOnly={submitted}
-                  onChange={e => handleOpenChange(question.id, e.target.value)}
-                  placeholder="Type your answer here…"
-                  rows={6}
-                  style={{
-                    width: '100%', boxSizing: 'border-box',
-                    padding: '12px 14px', borderRadius: 10,
-                    border: '1px solid var(--color-border)',
-                    background: submitted ? 'var(--color-sunk)' : 'var(--color-surface)',
-                    fontSize: 13, color: 'var(--color-ink)',
-                    fontFamily: 'var(--font-sans)', lineHeight: 1.6,
-                    resize: 'vertical',
-                    outline: 'none',
-                  }}
-                />
-              )}
-
-              {/* Save feedback */}
-              <div style={{ marginTop: 12, minHeight: 18, fontSize: 12 }}>
-                {saving    && <span style={{ color: 'var(--color-ink-muted)' }}>Saving…</span>}
-                {saveError && <span style={{ color: 'var(--color-incorrect)' }}>{saveError}</span>}
-              </div>
-            </div>
-          )}
-
-          {/* Navigation + submit */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-            <button
-              type="button"
-              disabled={isFirst}
-              onClick={() => setCurrentIdx(i => i - 1)}
-              className="btn-secondary"
-              style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, opacity: isFirst ? 0.4 : 1 }}
-            >
-              <ChevronLeft size={14} /> Previous
-            </button>
-
-            <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-              {submitError && (
-                <span style={{ fontSize: 12, color: 'var(--color-incorrect)' }}>{submitError}</span>
-              )}
-
-              {isLast ? (
-                <button
-                  type="button"
-                  disabled={submitting}
-                  onClick={handleSubmit}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 6,
-                    padding: '9px 20px', borderRadius: 9999,
-                    border: 'none', cursor: submitting ? 'default' : 'pointer',
-                    fontSize: 13, fontWeight: 600,
-                    background: 'var(--color-accent)', color: '#fff',
-                    fontFamily: 'var(--font-sans)',
-                    opacity: submitting ? 0.7 : 1,
-                    transition: 'opacity 150ms',
-                  }}
-                >
-                  {submitting ? 'Submitting…' : 'Submit quiz'}
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => setCurrentIdx(i => i + 1)}
-                  className="btn-secondary"
-                  style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}
-                >
-                  Next <ArrowRight size={14} />
-                </button>
-              )}
-            </div>
-          </div>
-        </>
-      )}
+      </>
     </div>
   )
 }

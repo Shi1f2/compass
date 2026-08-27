@@ -147,6 +147,37 @@ async function verifyQuizOwnership(quizId: string, orgId: string): Promise<boole
   return data !== null
 }
 
+/**
+ * Check that all questions in quizId are complete (multiple_choice with ≥2
+ * non-empty options and correct_option set).  Returns a human-readable error
+ * string if incomplete, or null when the quiz is ready to assign.
+ */
+async function verifyQuizComplete(quizId: string): Promise<string | null> {
+  const { data: questions } = await createClient()
+    .from('quiz_questions')
+    .select('id, kind, prompt, options, correct_option')
+    .eq('quiz_id', quizId)
+
+  if (!questions || questions.length === 0) {
+    return 'This quiz has no questions.'
+  }
+
+  let incompleteCount = 0
+  for (const q of questions) {
+    const opts: string[] = Array.isArray(q.options) ? q.options : []
+    const nonEmpty = opts.filter((o: string) => o.trim() !== '').length
+    if (nonEmpty < 2 || q.correct_option === null || q.correct_option === undefined) {
+      incompleteCount++
+    }
+  }
+
+  if (incompleteCount > 0) {
+    return `This quiz has ${incompleteCount} incomplete question${incompleteCount !== 1 ? 's' : ''} (fewer than 2 non-empty options or no correct answer marked).`
+  }
+
+  return null
+}
+
 /** Verify that questionId's parent quiz belongs to the calling supervisor's org. */
 async function verifyQuestionOwnership(questionId: string, orgId: string): Promise<boolean> {
   const { data } = await createClient()
@@ -162,33 +193,29 @@ async function verifyQuestionOwnership(questionId: string, orgId: string): Promi
 
 export async function createQuestion(
   quizId: string,
-  kind: 'multiple_choice' | 'open',
+  kind: 'multiple_choice',
   orderIndex: number,
 ): Promise<{ id: string | null; error: string | null }> {
   const caller = await requireSupervisor()
   if (!caller) return { id: null, error: 'Unauthorized' }
+
+  if (kind !== 'multiple_choice') {
+    return { id: null, error: 'Only multiple-choice questions are supported.' }
+  }
 
   if (!await verifyQuizOwnership(quizId, caller.orgId)) {
     return { id: null, error: 'Quiz not found in your organisation.' }
   }
 
   // Seed with valid defaults so DB constraints pass immediately.
-  const row: QuizQuestionInsert = kind === 'multiple_choice'
-    ? {
-        quiz_id:        quizId,
-        kind,
-        prompt:         'New question',
-        options:        ['Option A', 'Option B'],
-        correct_option: 0,
-        order_index:    orderIndex,
-      }
-    : {
-        quiz_id:     quizId,
-        kind,
-        prompt:      'New question',
-        model_answer: '',
-        order_index: orderIndex,
-      }
+  const row: QuizQuestionInsert = {
+    quiz_id:        quizId,
+    kind,
+    prompt:         'New question',
+    options:        ['Option A', 'Option B'],
+    correct_option: 0,
+    order_index:    orderIndex,
+  }
 
   const { data, error } = await createClient()
     .from('quiz_questions')
@@ -293,6 +320,10 @@ export async function attachQuizToRole(
   if (!quizOk) return { error: 'Quiz not found in your organisation.' }
   if (!roleOk) return { error: 'Job role not found in your organisation.' }
 
+  // B5: block attaching an incomplete quiz
+  const incomplete = await verifyQuizComplete(quizId)
+  if (incomplete) return { error: incomplete }
+
   const row: JobRoleQuizInsert = { job_role_id: jobRoleId, quiz_id: quizId }
   const { error } = await db
     .from('job_role_quizzes')
@@ -349,81 +380,7 @@ export async function countQuizAssignments(
   return { count: count ?? 0, error: null }
 }
 
-// ─── Scoring ──────────────────────────────────────────────────────────────────
-
-/**
- * Score one open-answer response.
- *
- * Rules enforced here (and redundantly by RLS + trigger):
- *  - Caller must be a supervisor.
- *  - The assignment must belong to one of the caller's supervisees.
- *  - The assignment must be submitted (score only after submission).
- *  - The question must be kind='open' — MC is auto-scored; supervisor cannot
- *    override it.
- *  - score must be 0–100.
- *  - scored_by and scored_at are written server-side; never trusted from input.
- */
-export async function scoreAnswer(
-  answerIdOrQuestionId: string,   // quiz_answers.id
-  score: number,
-): Promise<{ error: string | null }> {
-  const caller = await requireSupervisor()
-  if (!caller) return { error: 'Unauthorized' }
-
-  if (!Number.isInteger(score) || score < 0 || score > 100) {
-    return { error: 'Score must be a whole number between 0 and 100.' }
-  }
-
-  const db = createClient()
-
-  // Fetch the answer row, join through to verify supervisee ownership.
-  const { data: answer, error: fetchErr } = await db
-    .from('quiz_answers')
-    .select(`
-      id,
-      question_id,
-      assignment_id,
-      quiz_questions!inner ( kind ),
-      quiz_assignments!inner ( profile_id, status )
-    `)
-    .eq('id', answerIdOrQuestionId)
-    .maybeSingle() as unknown as {
-      data: {
-        id: string
-        question_id: string
-        assignment_id: string
-        quiz_questions: { kind: string }
-        quiz_assignments: { profile_id: string; status: string }
-      } | null
-      error: { message: string } | null
-    }
-
-  if (fetchErr) return { error: fetchErr.message }
-  if (!answer)  return { error: 'Answer not found.' }
-
-  if (!['submitted', 'published'].includes(answer.quiz_assignments.status)) {
-    return { error: 'Quiz has not been submitted yet.' }
-  }
-  if (answer.quiz_questions.kind !== 'open') {
-    return { error: 'Multiple-choice questions are scored automatically.' }
-  }
-
-  // Supervisee check — the calling supervisor must own this intern.
-  const isSupervisee = await verifySupervisee(caller.id, answer.quiz_assignments.profile_id)
-  if (!isSupervisee) return { error: 'This assignment does not belong to one of your interns.' }
-
-  const { error } = await db
-    .from('quiz_answers')
-    .update({
-      score,
-      scored_by: caller.id,
-      scored_at: new Date().toISOString(),
-    })
-    .eq('id', answer.id)
-
-  if (error) return { error: error.message }
-  return { error: null }
-}
+// (scoreAnswer removed — all questions are multiple-choice and auto-scored by trigger)
 
 // ─── Quiz assignment ──────────────────────────────────────────────────────────
 
@@ -443,6 +400,10 @@ export async function assignQuiz(
 
   const isSupervisee = await verifySupervisee(caller.id, profileId)
   if (!isSupervisee) return { error: 'This intern is not assigned to you.' }
+
+  // B5: block assigning an incomplete quiz
+  const incomplete = await verifyQuizComplete(quizId)
+  if (incomplete) return { error: incomplete }
 
   const row: QuizAssignmentInsert = {
     org_id:      caller.orgId,
@@ -504,74 +465,98 @@ export async function unassignQuiz(
   return { error: null }
 }
 
-// ─── Publish assignment ───────────────────────────────────────────────────────
+// ─── Supervisor feedback ──────────────────────────────────────────────────────
 
 /**
- * Publish a submitted assignment so the intern can see the review.
+ * Save overall feedback on a published assignment.
  *
- * Sets status → 'published', published_at, reviewed_by, and optionally
- * overall_feedback in a single update.
- *
- * Pre-condition: every open question must have a score.  The action
- * checks this explicitly and returns the count of unscored open questions
- * in the error so the UI can surface the reason for the disabled state.
+ * The assignment is auto-published by the submitQuiz action (service-role),
+ * so supervisors only write feedback — no publish step needed.
+ * Allowed for both 'submitted' and 'published' statuses.
  */
-export async function publishAssignment(
+export async function saveFeedback(
   assignmentId:    string,
   overallFeedback: string | null,
-): Promise<{ error: string | null; unscoredCount?: number }> {
+): Promise<{ error: string | null }> {
   const caller = await requireSupervisor()
   if (!caller) return { error: 'Unauthorized' }
 
   const db = createClient()
 
-  // Fetch assignment + verify ownership
   const { data: assignment, error: fetchErr } = await db
     .from('quiz_assignments')
-    .select('id, profile_id, status, quiz_id')
+    .select('id, profile_id, status')
     .eq('id', assignmentId)
     .maybeSingle()
 
   if (fetchErr) return { error: fetchErr.message }
   if (!assignment) return { error: 'Assignment not found.' }
-  if (assignment.status !== 'submitted') {
-    return { error: 'Only submitted assignments can be published.' }
+  if (!['submitted', 'published'].includes(assignment.status)) {
+    return { error: 'Feedback can only be saved for submitted or published assignments.' }
   }
 
   const isSupervisee = await verifySupervisee(caller.id, assignment.profile_id)
   if (!isSupervisee) return { error: 'This assignment does not belong to one of your interns.' }
 
-  // Count unscored open questions
-  const { data: openAnswers, error: openErr } = await db
-    .from('quiz_answers')
-    .select('id, score, quiz_questions!inner(kind)')
-    .eq('assignment_id', assignmentId) as unknown as {
-      data: { id: string; score: number | null; quiz_questions: { kind: string } }[] | null
-      error: { message: string } | null
-    }
-
-  if (openErr) return { error: openErr.message }
-
-  const unscoredCount = (openAnswers ?? []).filter(
-    a => a.quiz_questions.kind === 'open' && a.score === null
-  ).length
-
-  if (unscoredCount > 0) {
-    return {
-      error: `${unscoredCount} open question${unscoredCount !== 1 ? 's' : ''} still need scoring before publishing.`,
-      unscoredCount,
-    }
-  }
-
   const { error } = await db
     .from('quiz_assignments')
     .update({
-      status:           'published',
-      published_at:     new Date().toISOString(),
-      reviewed_by:      caller.id,
       overall_feedback: overallFeedback?.trim() || null,
+      reviewed_by:      caller.id,
     })
     .eq('id', assignmentId)
+
+  if (error) return { error: error.message }
+  return { error: null }
+}
+
+/**
+ * Save a supervisor comment on a single answer row (D11).
+ *
+ * Supervisor must own the assignment (their supervisee).
+ * The assignment must be submitted or published.
+ */
+export async function saveAnswerComment(
+  answerId: string,
+  comment:  string | null,
+): Promise<{ error: string | null }> {
+  const caller = await requireSupervisor()
+  if (!caller) return { error: 'Unauthorized' }
+
+  const db = createClient()
+
+  // Fetch the answer + assignment to verify ownership.
+  const { data: answer, error: fetchErr } = await db
+    .from('quiz_answers')
+    .select(`
+      id,
+      assignment_id,
+      quiz_assignments!inner ( profile_id, status )
+    `)
+    .eq('id', answerId)
+    .maybeSingle() as unknown as {
+      data: {
+        id: string
+        assignment_id: string
+        quiz_assignments: { profile_id: string; status: string }
+      } | null
+      error: { message: string } | null
+    }
+
+  if (fetchErr) return { error: fetchErr.message }
+  if (!answer)  return { error: 'Answer not found.' }
+
+  if (!['submitted', 'published'].includes(answer.quiz_assignments.status)) {
+    return { error: 'Comments can only be added to submitted or published assignments.' }
+  }
+
+  const isSupervisee = await verifySupervisee(caller.id, answer.quiz_assignments.profile_id)
+  if (!isSupervisee) return { error: 'This assignment does not belong to one of your interns.' }
+
+  const { error } = await db
+    .from('quiz_answers')
+    .update({ supervisor_comment: comment?.trim() || null })
+    .eq('id', answer.id)
 
   if (error) return { error: error.message }
   return { error: null }

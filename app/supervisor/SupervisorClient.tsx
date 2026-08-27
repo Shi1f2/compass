@@ -29,7 +29,7 @@ import ConsoleShell from '@/components/console/ConsoleShell'
 import ProcessingScreen, { type ProcessingStep } from '@/components/ProcessingScreen'
 import { signOut } from '@/lib/auth-actions'
 import { inviteIntern } from '@/lib/invite-action'
-import type { Starter } from '@/lib/supervisorData'
+import type { Starter, QuizCounts } from '@/lib/supervisorData'
 
 // ─── Session key ──────────────────────────────────────────────────────────────
 
@@ -72,25 +72,31 @@ interface SupervisorClientProps {
   orgName:         string
   interns:         InternRow[]
   taskCounts:      Record<string, { done: number; total: number }>
+  quizCounts:      Record<string, QuizCounts>
   invitations:     { id: string; email: string; role: string; status: string; created_at: string }[]
+}
+
+const EMPTY_QUIZ_COUNTS: QuizCounts = {
+  total: 0, untouched: 0, inProgress: 0, finished: 0, avgScore: null,
 }
 
 // ─── Map a DB profile row to a Starter ───────────────────────────────────────
 
 function internToStarter(
-  intern: InternRow,
-  counts: { done: number; total: number },
+  intern:    InternRow,
+  tasks:     { done: number; total: number },
+  quizzes:   QuizCounts,
 ): Starter {
   return {
-    id:        intern.id,
-    name:      intern.full_name,
-    initials:  nameInitials(intern.full_name),
-    jobTitle:  intern.job_title  ?? null,
-    team:      intern.team       ?? null,
-    startDate: intern.start_date ?? null,
-    taskDone:  counts.done,
-    taskTotal: counts.total,
-    quiz:      [],
+    id:         intern.id,
+    name:       intern.full_name,
+    initials:   nameInitials(intern.full_name),
+    jobTitle:   intern.job_title  ?? null,
+    team:       intern.team       ?? null,
+    startDate:  intern.start_date ?? null,
+    taskDone:   tasks.done,
+    taskTotal:  tasks.total,
+    quizCounts: quizzes,
   }
 }
 
@@ -104,6 +110,7 @@ export default function SupervisorClient({
   orgName,
   interns,
   taskCounts,
+  quizCounts,
 }: SupervisorClientProps) {
   const router = useRouter()
 
@@ -115,7 +122,11 @@ export default function SupervisorClient({
   profile.systemsMeta.workspaceName = orgName
 
   const roster: Starter[] = interns.map(intern =>
-    internToStarter(intern, taskCounts[intern.id] ?? { done: 0, total: 0 }),
+    internToStarter(
+      intern,
+      taskCounts[intern.id] ?? { done: 0, total: 0 },
+      quizCounts[intern.id] ?? EMPTY_QUIZ_COUNTS,
+    ),
   )
 
   // null  = not yet checked (renders nothing — matches server output)

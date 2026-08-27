@@ -111,7 +111,6 @@ function QuestionRow({
   const [expanded, setExpanded] = useState(index === 0)
   const isFirst = index === 0
   const isLast  = index === total - 1
-  const isMC    = question.kind === 'multiple_choice'
 
   // Local option list — kept in sync with server state via onUpdate
   const options: string[] = Array.isArray(question.options) ? question.options : []
@@ -136,12 +135,20 @@ function QuestionRow({
     })
   }
 
+  // Compute inline validation warnings
+  const nonEmptyOptions = options.filter(o => o.trim() !== '').length
+  const hasCorrect      = question.correct_option !== null && question.correct_option !== undefined
+  const warnings: string[] = []
+  if (nonEmptyOptions < 2) warnings.push('Add at least 2 non-empty options.')
+  if (!hasCorrect && options.length > 0) warnings.push('Mark the correct answer.')
+
   return (
     <div
       className="card"
       style={{
         padding: 0, overflow: 'hidden',
         opacity: saving ? 0.6 : 1, transition: 'opacity 150ms',
+        outline: warnings.length > 0 ? '1.5px solid var(--color-waiting)' : 'none',
       }}
     >
       {/* Collapsed header */}
@@ -167,41 +174,23 @@ function QuestionRow({
           {question.prompt}
         </span>
         <span style={{ fontSize: 11, color: 'var(--color-ink-muted)', flexShrink: 0, marginRight: 4 }}>
-          {isMC ? 'Multiple choice' : 'Open'}
+          Multiple choice
         </span>
         {expanded ? <ChevronUp size={14} color="var(--color-ink-muted)" /> : <ChevronDown size={14} color="var(--color-ink-muted)" />}
       </button>
 
       {expanded && (
         <div style={{ padding: '0 16px 16px', borderTop: '1px solid var(--color-border)' }}>
-          {/* Kind toggle */}
-          <div style={{ display: 'flex', gap: 8, marginTop: 14, marginBottom: 14 }}>
-            {(['multiple_choice', 'open'] as const).map(k => (
-              <button
-                key={k}
-                type="button"
-                onClick={() => {
-                  if (k === question.kind) return
-                  // Switch kind — reset fields to valid defaults
-                  if (k === 'multiple_choice') {
-                    onUpdate({ kind: k, options: ['Option A', 'Option B'], correct_option: 0, model_answer: null })
-                  } else {
-                    onUpdate({ kind: k, options: null, correct_option: null, model_answer: '' })
-                  }
-                }}
-                style={{
-                  padding: '5px 14px', borderRadius: 9999, border: 'none',
-                  cursor: 'pointer', fontSize: 12, fontWeight: 500,
-                  background: question.kind === k ? 'var(--color-accent-soft)' : 'var(--color-sunk)',
-                  color:      question.kind === k ? 'var(--color-accent)'      : 'var(--color-ink-muted)',
-                  transition: 'background 120ms, color 120ms',
-                  fontFamily: 'var(--font-sans)',
-                }}
-              >
-                {k === 'multiple_choice' ? 'Multiple choice' : 'Open answer'}
-              </button>
-            ))}
-          </div>
+          {/* Inline warnings */}
+          {warnings.length > 0 && (
+            <div style={{ marginTop: 12, marginBottom: 0 }}>
+              {warnings.map(w => (
+                <p key={w} style={{ margin: '4px 0 0', fontSize: 11, color: 'var(--color-waiting)' }}>
+                  ⚠ {w}
+                </p>
+              ))}
+            </div>
+          )}
 
           {/* Prompt */}
           <div style={{ marginBottom: 14 }}>
@@ -216,71 +205,55 @@ function QuestionRow({
           </div>
 
           {/* Multiple-choice options */}
-          {isMC && (
-            <div style={{ marginBottom: 14 }}>
-              <FieldLabel>Options — click the circle to mark correct</FieldLabel>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {options.map((opt, i) => (
-                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    {/* Correct-answer radio */}
-                    <button
-                      type="button"
-                      aria-label={`Mark option ${i + 1} as correct`}
-                      onClick={() => onUpdate({ correct_option: i })}
-                      style={{
-                        flexShrink: 0,
-                        width: 20, height: 20, borderRadius: '50%', border: 'none',
-                        cursor: 'pointer',
-                        background: question.correct_option === i ? 'var(--color-accent)' : 'transparent',
-                        outline: question.correct_option === i ? 'none' : '1.5px solid var(--color-border)',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        transition: 'background 120ms',
-                      }}
-                    >
-                      {question.correct_option === i && <Check size={10} strokeWidth={3} color="#fff" />}
-                    </button>
-                    <input
-                      className="field"
-                      value={opt}
-                      onChange={e => setOption(i, e.target.value)}
-                      style={{ flex: 1 }}
-                      placeholder={`Option ${i + 1}`}
-                    />
-                    <IconBtn onClick={() => removeOption(i)} title="Remove option" disabled={options.length <= 2}>
-                      <X size={13} />
-                    </IconBtn>
-                  </div>
-                ))}
-                <button
-                  type="button"
-                  onClick={addOption}
-                  style={{
-                    marginTop: 2, padding: '5px 12px',
-                    borderRadius: 6, border: '1px dashed var(--color-border)',
-                    background: 'none', cursor: 'pointer', fontSize: 12,
-                    color: 'var(--color-ink-muted)', fontFamily: 'var(--font-sans)',
-                    display: 'flex', alignItems: 'center', gap: 6, alignSelf: 'flex-start',
-                  }}
-                >
-                  <Plus size={12} /> Add option
-                </button>
-              </div>
+          <div style={{ marginBottom: 14 }}>
+            <FieldLabel>Options — click the circle to mark correct</FieldLabel>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {options.map((opt, i) => (
+                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  {/* Correct-answer radio */}
+                  <button
+                    type="button"
+                    aria-label={`Mark option ${i + 1} as correct`}
+                    onClick={() => onUpdate({ correct_option: i })}
+                    style={{
+                      flexShrink: 0,
+                      width: 20, height: 20, borderRadius: '50%', border: 'none',
+                      cursor: 'pointer',
+                      background: question.correct_option === i ? 'var(--color-accent)' : 'transparent',
+                      outline: question.correct_option === i ? 'none' : '1.5px solid var(--color-border)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      transition: 'background 120ms',
+                    }}
+                  >
+                    {question.correct_option === i && <Check size={10} strokeWidth={3} color="#fff" />}
+                  </button>
+                  <input
+                    className="field"
+                    value={opt}
+                    onChange={e => setOption(i, e.target.value)}
+                    style={{ flex: 1 }}
+                    placeholder={`Option ${i + 1}`}
+                  />
+                  <IconBtn onClick={() => removeOption(i)} title="Remove option" disabled={options.length <= 2}>
+                    <X size={13} />
+                  </IconBtn>
+                </div>
+              ))}
+              <button
+                type="button"
+                onClick={addOption}
+                style={{
+                  marginTop: 2, padding: '5px 12px',
+                  borderRadius: 6, border: '1px dashed var(--color-border)',
+                  background: 'none', cursor: 'pointer', fontSize: 12,
+                  color: 'var(--color-ink-muted)', fontFamily: 'var(--font-sans)',
+                  display: 'flex', alignItems: 'center', gap: 6, alignSelf: 'flex-start',
+                }}
+              >
+                <Plus size={12} /> Add option
+              </button>
             </div>
-          )}
-
-          {/* Open model answer */}
-          {!isMC && (
-            <div style={{ marginBottom: 14 }}>
-              <FieldLabel>Model answer (shown to supervisor during review)</FieldLabel>
-              <textarea
-                className="field"
-                rows={3}
-                value={question.model_answer ?? ''}
-                onChange={e => onUpdate({ model_answer: e.target.value })}
-                style={{ resize: 'vertical', width: '100%' }}
-              />
-            </div>
-          )}
+          </div>
 
           {/* Row controls */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 }}>
@@ -375,9 +348,9 @@ export function QuizEditor({ quiz, onBack, onSaved, onDeleted }: QuizEditorProps
 
   // ── Add question ───────────────────────────────────────────────────────────
 
-  async function handleAddQuestion(kind: 'multiple_choice' | 'open') {
+  async function handleAddQuestion() {
     const orderIndex = questions.length
-    const { id, error } = await createQuestion(quiz.id, kind, orderIndex)
+    const { id, error } = await createQuestion(quiz.id, 'multiple_choice', orderIndex)
     if (error || !id) return
     // Fetch the inserted row so we have all defaults
     const { data } = await supabase
@@ -577,25 +550,15 @@ export function QuizEditor({ quiz, onBack, onSaved, onDeleted }: QuizEditorProps
               ))}
             </div>
 
-            {/* Add-question buttons */}
-            <div style={{ display: 'flex', gap: 10 }}>
-              <button
-                type="button"
-                className="btn-secondary"
-                style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}
-                onClick={() => handleAddQuestion('multiple_choice')}
-              >
-                <Plus size={14} /> Multiple choice
-              </button>
-              <button
-                type="button"
-                className="btn-secondary"
-                style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}
-                onClick={() => handleAddQuestion('open')}
-              >
-                <Plus size={14} /> Open answer
-              </button>
-            </div>
+            {/* Add-question button */}
+            <button
+              type="button"
+              className="btn-secondary"
+              style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}
+              onClick={() => handleAddQuestion()}
+            >
+              <Plus size={14} /> Add question
+            </button>
           </>
         )}
       </div>
