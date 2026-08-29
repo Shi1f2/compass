@@ -8,6 +8,7 @@
  *   followed by a single platform tile (top platform by volume) at the end.
  *   Clicking a tile opens a question panel inline — inserted after the row
  *   that contains the clicked card so subsequent rows push down naturally.
+ *   Below the tile grid: a horizontal bar chart of all platforms by volume.
  */
 'use client'
 
@@ -20,6 +21,9 @@ const MIN_COL_WIDTH = 180  // must match minmax() in CSS grid
 
 // Sentinel key for the platform tile — guaranteed not to collide with a category key.
 const PLATFORM_KEY = '__platform__'
+
+// Maximum distinct bars before the remainder is folded into "Other".
+const MAX_PLATFORM_BARS = 11
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -52,6 +56,26 @@ function slugToLabel(slug: string): string {
   return slug
     .replace(/[-_]/g, ' ')
     .replace(/\b\w/g, c => c.toUpperCase())
+}
+
+/** Aggregate all platforms into a sorted bar list, folding overflow into "Other". */
+function platformBarsFromRows(rows: UserQuestion[]): Array<{ slug: string; label: string; count: number }> {
+  const map = new Map<string, number>()
+  for (const row of rows) {
+    if (!row.source_topic) continue
+    map.set(row.source_topic, (map.get(row.source_topic) ?? 0) + 1)
+  }
+  if (map.size === 0) return []
+
+  const sorted = Array.from(map.entries())
+    .sort((a, b) => b[1] - a[1])
+    .map(([slug, count]) => ({ slug, label: slugToLabel(slug), count }))
+
+  if (sorted.length <= MAX_PLATFORM_BARS) return sorted
+
+  const top   = sorted.slice(0, MAX_PLATFORM_BARS)
+  const other = sorted.slice(MAX_PLATFORM_BARS).reduce((sum, b) => sum + b.count, 0)
+  return [...top, { slug: '__other__', label: 'Other', count: other }]
 }
 
 /** Return the platform (source_topic slug) with the most questions, or null. */
@@ -239,6 +263,103 @@ function QuestionPanel({
   )
 }
 
+// ─── Platform bar chart ───────────────────────────────────────────────────────
+
+interface PlatformBarChartProps {
+  bars: Array<{ slug: string; label: string; count: number }>
+}
+
+function PlatformBarChart({ bars }: PlatformBarChartProps) {
+  const [hoveredSlug, setHoveredSlug] = useState<string | null>(null)
+
+  if (bars.length === 0) {
+    return (
+      <p style={{ margin: 0, fontSize: 13, color: 'var(--color-ink-muted)' }}>
+        No platform data available.
+      </p>
+    )
+  }
+
+  const maxCount    = bars[0].count
+  // Fixed width for the label column; bars fill the remaining space.
+  const LABEL_W     = 120
+  const BAR_HEIGHT  = 10
+  const ROW_HEIGHT  = 32   // vertical rhythm per bar row
+  const RADIUS      = 3    // corner radius on the data end of each bar
+  const COUNT_GAP   = 8    // gap between bar end and count label
+
+  return (
+    <div role="img" aria-label="Platform breakdown bar chart">
+      {bars.map(({ slug, label, count }) => {
+        const isHovered = hoveredSlug === slug
+        const tooltip   = isHovered ? `${label}: ${count}` : undefined
+        return (
+          <div
+            key={slug}
+            onMouseEnter={() => setHoveredSlug(slug)}
+            onMouseLeave={() => setHoveredSlug(null)}
+            title={tooltip}
+            style={{
+              display:    'flex',
+              alignItems: 'center',
+              height:     ROW_HEIGHT,
+              cursor:     'default',
+              position:   'relative',
+            }}
+          >
+            {/* Label column — fixed width, right-aligned */}
+            <div style={{
+              width:      LABEL_W,
+              flexShrink: 0,
+              paddingRight: 12,
+              textAlign:  'right',
+              fontSize:   12,
+              fontWeight: isHovered ? 600 : 400,
+              color:      isHovered ? 'var(--color-ink)' : 'var(--color-ink-muted)',
+              whiteSpace: 'nowrap',
+              overflow:   'hidden',
+              textOverflow: 'ellipsis',
+              transition: 'color 120ms, font-weight 120ms',
+              fontFamily: 'var(--font-sans)',
+            }}>
+              {label}
+            </div>
+
+            {/* Bar track + bar */}
+            <div style={{ flex: 1, position: 'relative', height: BAR_HEIGHT, background: 'var(--color-sunk)', borderRadius: RADIUS }}>
+              <div style={{
+                position:     'absolute',
+                left:         0,
+                top:          0,
+                height:       BAR_HEIGHT,
+                width:        `${(count / maxCount) * 100}%`,
+                background:   'var(--color-accent)',
+                // Right end rounded, left end square (grows from shared origin)
+                borderRadius: `0 ${RADIUS}px ${RADIUS}px 0`,
+                transition:   'width 300ms ease',
+              }} />
+            </div>
+
+            {/* Count label */}
+            <div style={{
+              flexShrink: 0,
+              paddingLeft: COUNT_GAP,
+              fontSize:   12,
+              fontWeight: 500,
+              color:      isHovered ? 'var(--color-ink)' : 'var(--color-ink-muted)',
+              fontFamily: 'var(--font-sans)',
+              minWidth:   28,
+              transition: 'color 120ms',
+            }}>
+              {count}
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 interface Props {
@@ -247,15 +368,16 @@ interface Props {
 }
 
 export default function QuestionHeatmap({ orgId, supervisorId }: Props) {
-  const [buckets,  setBuckets]  = useState<CategoryBucket[]>([])
-  const [platform, setPlatform] = useState<{ slug: string; count: number; questions: UserQuestion[] } | null>(null)
-  const [loading,  setLoading]  = useState(true)
-  const [error,    setError]    = useState<string | null>(null)
-  const [expanded, setExpanded] = useState<string | null>(null)
-  const [total,    setTotal]    = useState(0)
-  const [page,     setPage]     = useState(0)
-  const [visible,  setVisible]  = useState(false)
-  const [cols,     setCols]     = useState(4)
+  const [buckets,      setBuckets]      = useState<CategoryBucket[]>([])
+  const [platform,     setPlatform]     = useState<{ slug: string; count: number; questions: UserQuestion[] } | null>(null)
+  const [platformBars, setPlatformBars] = useState<Array<{ slug: string; label: string; count: number }>>([])
+  const [loading,      setLoading]      = useState(true)
+  const [error,        setError]        = useState<string | null>(null)
+  const [expanded,     setExpanded]     = useState<string | null>(null)
+  const [total,        setTotal]        = useState(0)
+  const [page,         setPage]         = useState(0)
+  const [visible,      setVisible]      = useState(false)
+  const [cols,         setCols]         = useState(4)
 
   const gridRef = useRef<HTMLDivElement>(null)
 
@@ -307,6 +429,7 @@ export default function QuestionHeatmap({ orgId, supervisorId }: Props) {
         setTotal(rows.length)
         setBuckets(bucketQuestions(rows))
         setPlatform(topPlatform(rows))
+        setPlatformBars(platformBarsFromRows(rows))
         setLoading(false)
       })
   }, [orgId, supervisorId])
@@ -385,7 +508,8 @@ export default function QuestionHeatmap({ orgId, supervisorId }: Props) {
             </p>
           </div>
         ) : (
-          /* Outer container — measured for column counting */
+          <>
+          {/* Outer container — measured for column counting */}
           <div ref={gridRef}>
             {allTileRows.map((tileIndices, rowIndex) => (
               <div key={rowIndex}>
@@ -529,6 +653,15 @@ export default function QuestionHeatmap({ orgId, supervisorId }: Props) {
               </div>
             ))}
           </div>
+
+          {/* ── Platform bar chart ────────────────────────────────────────── */}
+          <div style={{ marginTop: 36 }}>
+            <span className="section-label" style={{ display: 'block', marginBottom: 16 }}>
+              By platform
+            </span>
+            <PlatformBarChart bars={platformBars} />
+          </div>
+          </>
         )}
       </div>
     </div>
