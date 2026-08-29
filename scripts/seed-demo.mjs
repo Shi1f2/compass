@@ -718,7 +718,10 @@ const PM_QUIZZES = [
 //   label     — human-readable label shown in the heatmap tile
 //   weight    — relative likelihood of being chosen (higher = more questions)
 //               so the heatmap has an uneven, realistic shape
-//   questions — believable first-weeks questions in that person's voice
+//   questions — array of { text, platform } objects.
+//               platform is a lowercase identifier (letters, digits, underscores)
+//               matching the product the question is about, or null when the
+//               question is about process rather than a specific tool.
 
 const DEV_CATEGORIES = [
   {
@@ -726,11 +729,11 @@ const DEV_CATEGORIES = [
     label: 'Repo & Git',
     weight: 5,
     questions: [
-      'What is our branching strategy and how should I name my feature branches?',
-      'Do I need to squash commits before raising a pull request?',
-      "I can't push to main — is that expected or have I lost access?",
-      'Where can I find the commit message convention we follow?',
-      'How do I rebase my branch on top of the latest main without breaking things?',
+      { text: 'What is our branching strategy and how should I name my feature branches?',       platform: 'github' },
+      { text: 'Do I need to squash commits before raising a pull request?',                      platform: 'github' },
+      { text: "I can't push to main — is that expected or have I lost access?",                  platform: 'github' },
+      { text: 'Where can I find the commit message convention we follow?',                        platform: 'github' },
+      { text: 'How do I rebase my branch on top of the latest main without breaking things?',    platform: 'github' },
     ],
   },
   {
@@ -738,11 +741,11 @@ const DEV_CATEGORIES = [
     label: 'Local dev environment',
     weight: 5,
     questions: [
-      'What version of Node is the project expecting — should I use nvm or something else?',
-      "The Docker Compose stack starts but the app can't reach the database. What should I check first?",
-      'Where do I get the values for the .env.local file that the README says I need?',
-      "I'm on an M-series Mac and some native modules won't install. Is there a known workaround?",
-      'Is there a seed script I should run after a fresh database wipe to get test data back?',
+      { text: 'What version of Node is the project expecting — should I use nvm or something else?',           platform: 'node'   },
+      { text: "The Docker Compose stack starts but the app can't reach the database. What should I check first?", platform: 'docker' },
+      { text: 'Where do I get the values for the .env.local file that the README says I need?',                platform: null     },
+      { text: "I'm on an M-series Mac and some native modules won't install. Is there a known workaround?",    platform: null     },
+      { text: 'Is there a seed script I should run after a fresh database wipe to get test data back?',        platform: null     },
     ],
   },
   {
@@ -750,11 +753,11 @@ const DEV_CATEGORIES = [
     label: 'CI / CD pipeline',
     weight: 4,
     questions: [
-      'My pull request is blocking on a lint check I can reproduce locally but not fix — who should I ask?',
-      'How long should a typical CI run take before I suspect something is stuck?',
-      'What triggers a production deploy and do I need to do anything to promote my change?',
-      'The pipeline failed on a flaky test. Am I expected to re-run it myself or wait for someone?',
-      'Where can I see the history of recent deploys and which commits they included?',
+      { text: 'My GitHub Actions check is failing on lint but passes locally — where do I look first?',               platform: 'github' },
+      { text: 'How do I re-run just the failed jobs in a GitHub Actions workflow without triggering everything?',      platform: 'github' },
+      { text: 'What triggers a production deploy and do I need to do anything to promote my change?',                 platform: null     },
+      { text: 'The pipeline failed on a flaky test. Am I expected to re-run it myself or wait for someone?',          platform: null     },
+      { text: 'Where in GitHub can I see the history of recent deploys and which commits they included?',              platform: 'github' },
     ],
   },
   {
@@ -762,11 +765,11 @@ const DEV_CATEGORIES = [
     label: 'Code review',
     weight: 4,
     questions: [
-      'How many approvals does a PR need before I can merge it?',
-      'Is there a time-limit convention for how long reviewers have to respond?',
-      'What is the difference between a comment and a blocking review here — can I merge with unresolved comments?',
-      'Should I be self-reviewing my PRs before requesting review, and if so what does that mean in practice?',
-      "I got a review with a lot of nits. Am I supposed to address all of them before merging or just the blocking ones?",
+      { text: 'How many approvals does a GitHub PR need before I can merge it?',                                       platform: 'github' },
+      { text: 'Is there a time-limit convention for how long reviewers have to respond?',                              platform: null     },
+      { text: 'What is the difference between a comment and a blocking review in GitHub — can I merge with unresolved comments?', platform: 'github' },
+      { text: 'Should I be self-reviewing my PRs before requesting review, and if so what does that mean in practice?', platform: null   },
+      { text: "I got a review with a lot of nits. Am I supposed to address all of them before merging or just the blocking ones?", platform: null },
     ],
   },
   {
@@ -774,11 +777,11 @@ const DEV_CATEGORIES = [
     label: 'Deployments',
     weight: 3,
     questions: [
-      'Do we have a deployment freeze period around releases and if so how will I know when one is active?',
-      'What is the rollback procedure if something I deploy causes an error spike?',
-      'How do I deploy only to staging without it going to production as well?',
-      'Who needs to be notified before a deployment that touches the payments service?',
-      'Is there a changelog I should update when I ship something user-facing?',
+      { text: 'Do we have a deployment freeze period around releases and how is it communicated — is there a Slack channel?', platform: 'slack' },
+      { text: 'What is the rollback procedure if something I deploy causes an error spike?',                           platform: null    },
+      { text: 'How do I deploy only to staging without it going to production as well?',                               platform: null    },
+      { text: 'Who needs to be notified before a deployment that touches the payments service?',                        platform: null    },
+      { text: 'Is there a changelog I should update when I ship something user-facing?',                               platform: null    },
     ],
   },
   {
@@ -786,11 +789,11 @@ const DEV_CATEGORIES = [
     label: 'Monitoring & alerts',
     weight: 3,
     questions: [
-      'How do I find the logs for the service I am working on without trawling through everything?',
-      'I triggered an alert in staging. Do I need to acknowledge it somewhere or will it clear on its own?',
-      'What dashboard should I be watching for error rates after a deploy?',
-      'How do I tell whether a spike in latency is related to my change or something external?',
-      'Where do I find the on-call schedule if I need to escalate something I see in the dashboards?',
+      { text: 'How do I find the logs for my service in Datadog without trawling through everything?',                 platform: 'datadog' },
+      { text: 'I triggered a Datadog alert in staging — do I need to acknowledge it or will it clear on its own?',    platform: 'datadog' },
+      { text: 'Which Datadog dashboard should I be watching for error rates after a deploy?',                          platform: 'datadog' },
+      { text: 'How do I tell in Datadog whether a latency spike is from my change or something external?',             platform: 'datadog' },
+      { text: 'Where do I find the PagerDuty on-call schedule if I need to escalate something I see in Datadog?',     platform: 'pagerduty' },
     ],
   },
   {
@@ -798,11 +801,11 @@ const DEV_CATEGORIES = [
     label: 'Secrets & config',
     weight: 3,
     questions: [
-      'Where are environment variables managed for production — is it a secrets manager or something in the repo?',
-      'I need to add a new API key to the staging environment. Who can do that and how?',
-      'Are there any secrets in the repo I should know about, or is the rule that secrets never go in git?',
-      'How do I rotate a secret without causing downtime for the service that uses it?',
-      'What is the difference between the staging and production config and where is that documented?',
+      { text: 'Where are environment variables managed for production — is it a secrets manager or something in the repo?', platform: null },
+      { text: 'I need to add a new API key to the staging environment. Who can do that and how?',                           platform: null },
+      { text: 'Are there any secrets in the repo I should know about, or is the rule that secrets never go in git?',        platform: 'git' },
+      { text: 'How do I rotate a secret without causing downtime for the service that uses it?',                            platform: null  },
+      { text: 'What is the difference between the staging and production config and where is that documented?',             platform: null  },
     ],
   },
   {
@@ -810,11 +813,11 @@ const DEV_CATEGORIES = [
     label: 'Testing',
     weight: 3,
     questions: [
-      'Is there a minimum test coverage threshold I need to hit before a PR can be merged?',
-      'What is the distinction between unit and integration tests in this codebase and where do each live?',
-      'Are E2E tests run on every PR or only on release branches?',
-      'I am writing a test for a function that calls an external API. Should I mock it or use a test account?',
-      'Where is the shared test fixture data kept and how do I add to it without breaking existing tests?',
+      { text: 'Is there a minimum Jest coverage threshold I need to hit before a PR can be merged?',               platform: 'jest'   },
+      { text: 'What is the distinction between unit and integration tests in this codebase and where do each live?', platform: null   },
+      { text: 'Are Cypress E2E tests run on every PR or only on release branches?',                                platform: 'cypress' },
+      { text: 'I am writing a Jest test for a function that calls an external API — should I mock it or use a test account?', platform: 'jest' },
+      { text: 'Where is the shared test fixture data kept and how do I add to it without breaking existing tests?', platform: null    },
     ],
   },
   {
@@ -822,11 +825,11 @@ const DEV_CATEGORIES = [
     label: 'Incident response',
     weight: 2,
     questions: [
-      'If I notice something broken in production outside of working hours, what do I do?',
-      'Where do I file a post-incident review and what is the expected turnaround?',
-      'What counts as a P1 versus a P2 incident here and who makes that call?',
-      'Am I expected to join the incident bridge as an observer even when it is not my service?',
-      'How do I mark an incident as resolved and communicate that to stakeholders?',
+      { text: 'If I notice something broken in production outside of working hours, should I page the on-call engineer in PagerDuty?', platform: 'pagerduty' },
+      { text: 'Where do I file a post-incident review and what is the expected turnaround?',                       platform: null     },
+      { text: 'What counts as a P1 versus a P2 incident here and who makes that call?',                           platform: null     },
+      { text: 'Am I expected to join the incident Slack channel as an observer even when it is not my service?',   platform: 'slack'  },
+      { text: 'How do I mark an incident as resolved and communicate that to stakeholders?',                       platform: null     },
     ],
   },
   {
@@ -834,11 +837,11 @@ const DEV_CATEGORIES = [
     label: 'Architecture',
     weight: 2,
     questions: [
-      'Where is the system architecture documented and how up to date is it?',
-      'I need to add a new service — is there an ADR process I should follow first?',
-      'What is the convention for service-to-service communication — REST, gRPC, events?',
-      'Are there any services I should avoid calling directly from my new code for ownership reasons?',
-      'Who owns the data model for the accounts domain and how do I raise a schema change?',
+      { text: 'Where is the system architecture documented and how up to date is it?',                             platform: null },
+      { text: 'I need to add a new service — is there an ADR process I should follow first?',                     platform: null },
+      { text: 'What is the convention for service-to-service communication — REST, gRPC, events?',                 platform: null },
+      { text: 'Are there any services I should avoid calling directly from my new code for ownership reasons?',    platform: null },
+      { text: 'Who owns the data model for the accounts domain and how do I raise a schema change?',               platform: null },
     ],
   },
   {
@@ -846,11 +849,11 @@ const DEV_CATEGORIES = [
     label: 'Security',
     weight: 2,
     questions: [
-      'Is there a security review process I need to go through before shipping something that handles user data?',
-      'What is the policy on third-party packages — do I need approval before adding a new dependency?',
-      'I spotted what might be a vulnerability. Who do I report it to and how?',
-      'What is our approach to SQL injection protection — ORM only, or are parameterised queries allowed?',
-      'Is there a pentest report I should read to understand the known surface areas?',
+      { text: 'Is there a security review process I need to go through before shipping something that handles user data?', platform: null },
+      { text: 'What is the policy on third-party packages — do I need approval before adding a new dependency?',          platform: null },
+      { text: 'I spotted what might be a vulnerability. Who do I report it to and how?',                                  platform: null },
+      { text: 'What is our approach to SQL injection protection — ORM only, or are parameterised queries allowed?',       platform: null },
+      { text: 'Is there a pentest report I should read to understand the known surface areas?',                           platform: null },
     ],
   },
   {
@@ -858,11 +861,11 @@ const DEV_CATEGORIES = [
     label: 'Dependency management',
     weight: 2,
     questions: [
-      'How do we decide when to upgrade a major dependency version and who owns that process?',
-      'I see a Dependabot PR sitting open for two weeks. Am I allowed to merge it or does someone specific own those?',
-      'What is our policy on pinning exact versions versus using ranges in package.json?',
-      'Is there a process for removing an unused dependency or do I just delete it and run the tests?',
-      'One of our transitive dependencies has a critical CVE. What is the expected response time?',
+      { text: 'How do we decide when to upgrade a major dependency version and who owns that process?',                   platform: null        },
+      { text: 'I see a Dependabot PR sitting open for two weeks. Am I allowed to merge it or does someone specific own those?', platform: 'dependabot' },
+      { text: 'What is our policy on pinning exact versions versus using ranges in package.json?',                         platform: 'npm'       },
+      { text: 'Is there a process for removing an unused dependency or do I just delete it and run the tests?',           platform: null        },
+      { text: 'One of our transitive dependencies has a critical CVE. What is the expected response time?',               platform: null        },
     ],
   },
   {
@@ -870,11 +873,11 @@ const DEV_CATEGORIES = [
     label: 'On-call',
     weight: 1,
     questions: [
-      'When will I be added to the on-call rota and what do I need to do to prepare?',
-      'What tooling do I need on my phone for on-call and is there a setup guide?',
-      'Is there shadowing before I take my first solo on-call shift?',
-      'What is the handover process between the outgoing and incoming on-call engineers?',
-      'How do I claim the on-call compensation — is it automatic or do I need to submit something?',
+      { text: 'When will I be added to the PagerDuty rota and what do I need to do to prepare?',                   platform: 'pagerduty' },
+      { text: 'Do I need the PagerDuty app on my phone and is there a setup guide?',                               platform: 'pagerduty' },
+      { text: 'Is there shadowing before I take my first solo on-call shift?',                                     platform: null        },
+      { text: 'What is the handover process between the outgoing and incoming on-call engineers?',                  platform: null        },
+      { text: 'How do I claim the on-call compensation — is it automatic or do I need to submit something?',       platform: null        },
     ],
   },
   {
@@ -882,11 +885,11 @@ const DEV_CATEGORIES = [
     label: 'Documentation',
     weight: 1,
     questions: [
-      'Where should I put the runbook for the service I am building?',
-      'Is there a style guide for technical documentation or can I use any format?',
-      'How do I request a review of documentation I have written before it goes live?',
-      'Are diagrams kept in the repo alongside the code or in a separate place like Confluence?',
-      "My team's README is out of date. Am I expected to fix it as part of onboarding or raise a ticket?",
+      { text: 'Where should I put the runbook for the service I am building?',                                     platform: null        },
+      { text: 'Is there a style guide for technical documentation or can I use any format?',                       platform: null        },
+      { text: 'How do I request a review of documentation I have written before it goes live?',                    platform: null        },
+      { text: 'Are diagrams kept in the repo alongside the code or in a separate place like Confluence?',          platform: 'confluence' },
+      { text: "My team's README is out of date. Am I expected to fix it as part of onboarding or raise a ticket?", platform: null        },
     ],
   },
 ]
@@ -898,11 +901,11 @@ const PM_CATEGORIES = [
     label: 'Project intake',
     weight: 5,
     questions: [
-      'How does a new project get formally initiated here — is there a brief template or a kick-off meeting?',
-      'Who signs off on the project scope before I am allowed to start planning?',
-      'Where do I find the intake criteria used to decide whether a request becomes a project?',
-      'I have been handed a project with no brief. What is the minimum I need before I start planning?',
-      'What is the process for declining a project request that does not meet the intake threshold?',
+      { text: 'How does a new project get formally initiated here — is there a Confluence template or a kick-off meeting?', platform: 'confluence' },
+      { text: 'Who signs off on the project scope before I am allowed to start planning?',                                  platform: null         },
+      { text: 'How do I create the Jira project for a new initiative and which project template should I use?',             platform: 'jira'       },
+      { text: 'I have been handed a project with no brief. What is the minimum I need before I start planning?',            platform: null         },
+      { text: 'What is the process for declining a project request that does not meet the intake threshold?',               platform: null         },
     ],
   },
   {
@@ -910,11 +913,11 @@ const PM_CATEGORIES = [
     label: 'Stakeholder management',
     weight: 5,
     questions: [
-      'How do I find out who the key stakeholders are for a project that was already in flight when I joined?',
-      'What is the expectation for how often I should be touching base with senior stakeholders?',
-      'One of my stakeholders keeps changing their requirements. What is the escalation path?',
-      'Is there a stakeholder map template I should fill out at the start of every project?',
-      'How do I handle a stakeholder who is going around me directly to the delivery team?',
+      { text: 'How do I find out who the key stakeholders are for a project that was already in flight when I joined?',    platform: null         },
+      { text: 'Is there a Confluence page or Slack channel I should join to stay across stakeholder updates on my project?', platform: 'confluence' },
+      { text: 'One of my stakeholders keeps changing their requirements. What is the escalation path?',                    platform: null         },
+      { text: 'Is there a stakeholder map template in Confluence I should fill out at the start of every project?',        platform: 'confluence' },
+      { text: 'How do I handle a stakeholder who is going around me directly to the delivery team?',                       platform: null         },
     ],
   },
   {
@@ -922,11 +925,11 @@ const PM_CATEGORIES = [
     label: 'Risk register',
     weight: 4,
     questions: [
-      'What tool do we use to maintain the risk register and where is the template?',
-      'How often is the risk register expected to be reviewed and updated?',
-      'What is the threshold for escalating a risk from amber to red?',
-      'Who else needs to sign off on risks rated red before I can continue with the plan?',
-      'Is there a standard set of risk categories I should be using or can I define my own?',
+      { text: 'How do I set up a Jira issue type for risks and where is the team\'s current risk board?',                  platform: 'jira'       },
+      { text: 'How often is the risk register expected to be reviewed and updated?',                                       platform: null         },
+      { text: 'What is the threshold for escalating a risk from amber to red?',                                            platform: null         },
+      { text: 'Who else needs to sign off on risks rated red before I can continue with the plan?',                        platform: null         },
+      { text: 'Should I log a Jira ticket when a risk becomes an issue, or is the risk register entry enough?',            platform: 'jira'       },
     ],
   },
   {
@@ -934,11 +937,11 @@ const PM_CATEGORIES = [
     label: 'RAID log',
     weight: 4,
     questions: [
-      'What is the difference between an assumption and a dependency in our RAID log format?',
-      'How long do resolved issues stay on the log before they are archived?',
-      'Who owns actions on the RAID log — me as PM or the person the action is assigned to?',
-      'Is there a threshold for issues that requires me to notify the programme board?',
-      'I inherited a RAID log that has not been maintained. What should I prioritise cleaning up first?',
+      { text: 'Do we maintain the RAID log in Confluence or as a Jira board, and where is the current one for my project?', platform: 'jira'       },
+      { text: 'How long do resolved issues stay on the log before they are archived?',                                     platform: null         },
+      { text: 'Who owns actions on the RAID log — me as PM or the person the action is assigned to?',                      platform: null         },
+      { text: 'Is there a threshold for issues that requires me to notify the programme board?',                            platform: null         },
+      { text: 'I inherited a RAID log that has not been maintained. Should I migrate it into Jira or keep it in Confluence?', platform: 'jira'    },
     ],
   },
   {
@@ -946,11 +949,11 @@ const PM_CATEGORIES = [
     label: 'Sprint ceremonies',
     weight: 4,
     questions: [
-      'What is the expected length of a sprint planning session for a team of eight people?',
-      'Who facilitates the retrospective — the PM or the team lead?',
-      'Is there a standard agenda for the daily stand-up or does each team run it differently?',
-      'How do I handle a sprint review where the demo environment is broken on the day?',
-      'What is the policy on cancelling a sprint if scope changes significantly mid-sprint?',
+      { text: 'Where do I set up the sprint in Jira and how do I move stories into it during planning?',                   platform: 'jira'  },
+      { text: 'Who facilitates the retrospective — the PM or the team lead?',                                              platform: null    },
+      { text: 'Is the daily stand-up run from the Jira board or does each team do it differently?',                        platform: 'jira'  },
+      { text: 'How do I handle a sprint review where the demo environment is broken on the day?',                          platform: null    },
+      { text: 'What is the policy on cancelling a sprint if scope changes significantly mid-sprint?',                      platform: null    },
     ],
   },
   {
@@ -958,11 +961,11 @@ const PM_CATEGORIES = [
     label: 'Delivery metrics',
     weight: 3,
     questions: [
-      'What metrics does the programme board expect to see on a regular status report?',
-      'How is velocity calculated here — story points, number of stories or something else?',
-      'Is there a dashboard I should be feeding data into or do I compile the metrics manually?',
-      'What is considered an acceptable cycle time for a user story from start to done?',
-      'Who reviews the metrics and how quickly do I need to act if something goes off track?',
+      { text: 'What metrics does the programme board expect to see on a regular status report?',                           platform: null   },
+      { text: 'How is velocity calculated in Jira — story points, issue count, or something else?',                       platform: 'jira' },
+      { text: 'Is there a Jira dashboard I should be maintaining or do I compile the metrics manually?',                  platform: 'jira' },
+      { text: 'What is considered an acceptable cycle time for a user story from start to done?',                         platform: null   },
+      { text: 'Who reviews the metrics and how quickly do I need to act if something goes off track?',                    platform: null   },
     ],
   },
   {
@@ -970,11 +973,11 @@ const PM_CATEGORIES = [
     label: 'Change control',
     weight: 3,
     questions: [
-      'What constitutes a change that needs to go through the formal change control process?',
-      'How long does a change request typically take to be approved and who can approve it?',
-      'Is there an emergency change process for fixes that need to go live immediately?',
-      'What happens if I implement a change without raising a change request first?',
-      'Where is the change log kept and am I responsible for updating it after a change is approved?',
+      { text: 'What constitutes a change that needs to go through the formal change control process?',                    platform: null         },
+      { text: 'How long does a change request typically take to be approved and who can approve it?',                     platform: null         },
+      { text: 'Is there an emergency change process for fixes that need to go live immediately?',                         platform: null         },
+      { text: 'Where in Confluence is the change log and am I responsible for updating it after approval?',               platform: 'confluence' },
+      { text: 'What happens if I implement a change without raising a change request first?',                             platform: null         },
     ],
   },
   {
@@ -982,11 +985,11 @@ const PM_CATEGORIES = [
     label: 'Budget tracking',
     weight: 3,
     questions: [
-      'Where do I access the project budget and what level of detail is tracked?',
-      'What is the process for raising a budget amendment if I am forecasting an overrun?',
-      'How often do I need to reconcile actual spend against the forecast?',
-      'Who approves ad-hoc purchases that are not in the original budget?',
-      'Is there a contingency reserve and what is the threshold for using it without further approval?',
+      { text: 'Where do I access the project budget and what level of detail is tracked?',                                platform: null },
+      { text: 'What is the process for raising a budget amendment if I am forecasting an overrun?',                      platform: null },
+      { text: 'How often do I need to reconcile actual spend against the forecast?',                                      platform: null },
+      { text: 'Who approves ad-hoc purchases that are not in the original budget?',                                       platform: null },
+      { text: 'Is there a contingency reserve and what is the threshold for using it without further approval?',          platform: null },
     ],
   },
   {
@@ -994,11 +997,11 @@ const PM_CATEGORIES = [
     label: 'Resource planning',
     weight: 2,
     questions: [
-      'How do I request a resource from another team and what is the lead time I should plan for?',
-      'Where is the resource capacity plan kept and how do I feed my project demand into it?',
-      'What do I do if a resource I was counting on is pulled from my project mid-delivery?',
-      'Is there a bench of available contractors I can draw on if the internal team is at capacity?',
-      'How do I handle a team member who is allocated to my project but spending time on other work?',
+      { text: 'How do I request a resource from another team — is there a Jira ticket type or a Slack channel for that?', platform: 'jira'  },
+      { text: 'Where is the resource capacity plan kept and how do I feed my project demand into it?',                    platform: null    },
+      { text: 'What do I do if a resource I was counting on is pulled from my project mid-delivery?',                     platform: null    },
+      { text: 'Is there a bench of available contractors I can draw on if the internal team is at capacity?',             platform: null    },
+      { text: 'How do I handle a team member who is allocated to my project but spending time on other work?',            platform: null    },
     ],
   },
   {
@@ -1006,11 +1009,11 @@ const PM_CATEGORIES = [
     label: 'Status reporting',
     weight: 2,
     questions: [
-      'How often are status reports expected and who is the audience?',
-      'Is there a template for the RAG status report or do I format it myself?',
-      'What is the difference between the summary I send to the programme board and the one I send to the sponsor?',
-      'How far in advance do I need to submit a status report before a governance meeting?',
-      'What do I do if I have to report a red status for the first time — is there a separate notification I should send?',
+      { text: 'How often are status reports expected and who is the audience?',                                           platform: null         },
+      { text: 'Is there a Confluence template for the RAG status report or do I format it myself?',                      platform: 'confluence' },
+      { text: 'What is the difference between the summary I send to the programme board and the one I send to the sponsor?', platform: null      },
+      { text: 'How far in advance do I need to submit a status report before a governance meeting?',                      platform: null         },
+      { text: 'When I need to report a red status, should I post in the project Slack channel before the formal report?', platform: 'slack'      },
     ],
   },
   {
@@ -1018,11 +1021,11 @@ const PM_CATEGORIES = [
     label: 'Dependency tracking',
     weight: 2,
     questions: [
-      'How do I flag a cross-team dependency and get it acknowledged by the other PM?',
-      'What happens when a dependency I own slips — who do I tell and how quickly?',
-      'Is there a shared dependency register at programme level or does each project maintain its own?',
-      'How should I handle a dependency that has no owner yet?',
-      'I have a hard external dependency on a third-party delivery. Where do I record that risk?',
+      { text: 'How do I flag a cross-team dependency in Jira and get it acknowledged by the other PM?',                   platform: 'jira' },
+      { text: 'What happens when a dependency I own slips — who do I tell and how quickly?',                              platform: null   },
+      { text: 'Is there a shared dependency register at programme level or does each project maintain its own?',          platform: null   },
+      { text: 'How should I handle a dependency that has no owner yet?',                                                  platform: null   },
+      { text: 'I have a hard external dependency on a third-party delivery. Where do I record that risk?',                platform: null   },
     ],
   },
   {
@@ -1030,11 +1033,11 @@ const PM_CATEGORIES = [
     label: 'Retrospectives',
     weight: 1,
     questions: [
-      'Is there a standard retrospective format the organisation prefers or can I choose the technique?',
-      'Who should attend the retrospective — delivery team only or stakeholders as well?',
-      'How are retrospective actions tracked and who is accountable if they are not completed?',
-      'What is the expectation for sharing retrospective outcomes outside the team?',
-      'How soon after a project closes should the post-project retrospective be held?',
+      { text: 'Do teams use Miro for retrospectives here or is there another tool?',                                      platform: 'miro' },
+      { text: 'Who should attend the retrospective — delivery team only or stakeholders as well?',                        platform: null   },
+      { text: 'How are retrospective actions tracked — do they go into Jira or somewhere else?',                          platform: 'jira' },
+      { text: 'What is the expectation for sharing retrospective outcomes outside the team?',                             platform: null   },
+      { text: 'How soon after a project closes should the post-project retrospective be held?',                           platform: null   },
     ],
   },
   {
@@ -1042,11 +1045,11 @@ const PM_CATEGORIES = [
     label: 'Governance',
     weight: 1,
     questions: [
-      'What governance boards does my project need to report to and how often do they meet?',
-      'Is there a project classification system that determines the level of governance oversight?',
-      'What artefacts do I need to prepare for a gate review and how far in advance?',
-      'Who chairs the steering committee and how do I get time on the agenda?',
-      'Are there any mandatory assurance reviews built into the delivery lifecycle here?',
+      { text: 'What governance boards does my project need to report to and how often do they meet?',                     platform: null         },
+      { text: 'Is there a project classification system that determines the level of governance oversight?',               platform: null         },
+      { text: 'Where in Confluence do I find the gate review template and what artefacts does it need?',                  platform: 'confluence' },
+      { text: 'Who chairs the steering committee and how do I get time on the agenda?',                                   platform: null         },
+      { text: 'Are there any mandatory assurance reviews built into the delivery lifecycle here?',                        platform: null         },
     ],
   },
   {
@@ -1054,101 +1057,116 @@ const PM_CATEGORIES = [
     label: 'Escalation paths',
     weight: 1,
     questions: [
-      'What is the process for escalating a blocker that I cannot resolve at project level?',
-      'Who do I escalate to if two senior stakeholders give me conflicting direction?',
-      'Is there a formal escalation matrix or do I just judge it case by case?',
-      'How quickly is an escalation expected to be resolved once it reaches programme level?',
-      'Should I document every escalation somewhere even if it gets resolved informally?',
+      { text: 'What is the process for escalating a blocker that I cannot resolve at project level?',                     platform: null },
+      { text: 'Who do I escalate to if two senior stakeholders give me conflicting direction?',                           platform: null },
+      { text: 'Is there a formal escalation matrix or do I just judge it case by case?',                                  platform: null },
+      { text: 'How quickly is an escalation expected to be resolved once it reaches programme level?',                    platform: null },
+      { text: 'Should I document every escalation somewhere even if it gets resolved informally?',                        platform: null },
     ],
   },
 ]
 
 /**
- * Build the user_questions rows for one person.
+ * Build ALL user_questions rows for a team deterministically.
  *
- * Each person receives a small handful of questions (2–5) chosen entirely by
- * the category weights — high-weight categories accumulate more questions
- * across the team, creating the volume differences the heatmap exists to show.
+ * Algorithm:
+ *  1. Compute a team-wide question budget (TEAM_QUESTION_BUDGET).
+ *  2. Allocate that budget across categories in proportion to their weights
+ *     using a largest-remainder method so the parts sum exactly to the budget,
+ *     with a floor of at least 2 per category so none is rounded away.
+ *  3. Within each category, cycle through its questions in order so every
+ *     question gets used rather than one repeating.
+ *  4. Spread the resulting rows across the team members using PERSON_COUNTS,
+ *     a fixed sequence whose values sum to TEAM_QUESTION_BUDGET and whose
+ *     spread (6–10) looks natural.
  *
- * Coverage across the whole team is handled separately by
- * applyTeamCoverage(), which appends any missing-category rows after all
- * people have been processed.
- *
- * @param {string}  userId
- * @param {string}  orgId
- * @param {string}  email        — used as the seeding key
- * @param {number}  startOffset  — Math.abs(person.start), used for date spread
- * @param {Array}   categories   — the team's category set
+ * @param {Array}  teamMembers  — array of { userId, orgId, email, startOffset }
+ * @param {string} orgId
+ * @param {Array}  categories   — the team's category set
  * @returns {Array} rows ready to INSERT into user_questions
  */
-function buildHeatmapRows(userId, orgId, email, startOffset, categories) {
-  const totalCount  = 2 + Math.floor(seededFloat(email + 'heatmap') * 4)  // 2–5
-  const totalWeight = categories.reduce((s, c) => s + c.weight, 0)
-  const rows = []
 
-  for (let qi = 0; qi < totalCount; qi++) {
-    const r = seededFloat(email + 'wt' + qi) * totalWeight
-    let acc = 0
-    let chosen = categories[categories.length - 1]
-    for (const cat of categories) {
-      acc += cat.weight
-      if (r < acc) { chosen = cat; break }
+/** Total questions per 15-person team.  Chosen so weight-5 categories get
+ *  budget * (5/totalWeight) rows and weight-1 categories get budget * (1/totalWeight),
+ *  yielding exactly a 5:1 ratio when totalWeight = 40.  At 120 the per-category
+ *  exact shares are all whole numbers (no remainder pass needed), but the
+ *  largest-remainder logic is included for robustness. */
+const TEAM_QUESTION_BUDGET = 120
+
+/** Per-person question counts for 15 people.  Values sum to TEAM_QUESTION_BUDGET (120).
+ *  Range 6–10 makes per-person counts look natural. */
+const PERSON_COUNTS = [6, 7, 9, 8, 10, 7, 8, 9, 6, 10, 8, 7, 9, 6, 10]
+
+function buildTeamHeatmapRows(teamMembers, orgId, categories) {
+  if (teamMembers.length === 0) return []
+
+  // ── Step 1: allocate budget across categories ────────────────────────────
+  const totalWeight = categories.reduce((s, c) => s + c.weight, 0)
+  const FLOOR = 2
+
+  // Exact fractional shares
+  const exact = categories.map(c => (c.weight / totalWeight) * TEAM_QUESTION_BUDGET)
+
+  // Floor each share (minimum FLOOR)
+  const floors = exact.map(e => Math.max(FLOOR, Math.floor(e)))
+
+  // Distribute any remaining budget using largest-remainder method
+  let remaining = TEAM_QUESTION_BUDGET - floors.reduce((s, f) => s + f, 0)
+  const remainders = exact.map((e, i) => ({ i, r: e - Math.floor(e) }))
+  remainders.sort((a, b) => b.r - a.r)
+  for (let k = 0; k < remaining; k++) {
+    floors[remainders[k].i]++
+  }
+
+  // ── Step 2: build the flat ordered list of (category, questionIndex) pairs
+  //    cycling through each category's questions in order ─────────────────
+  const flatSlots = []   // each element: { cat, q }
+  for (let ci = 0; ci < categories.length; ci++) {
+    const cat   = categories[ci]
+    const count = floors[ci]
+    for (let k = 0; k < count; k++) {
+      const q = cat.questions[k % cat.questions.length]
+      flatSlots.push({ cat, q })
     }
-    const qIdx  = Math.floor(seededFloat(email + 'wq' + qi) * chosen.questions.length)
-    const asked = randomPastDate(1, startOffset + 10)
-    rows.push({
-      org_id:         orgId,
-      user_id:        userId,
-      question:       chosen.questions[qIdx],
-      category:       chosen.category,
-      category_label: chosen.label,
-      asked_at:       asked,
-    })
+  }
+
+  // Shuffle the flat list with a deterministic Fisher-Yates so questions from
+  // different categories are interleaved rather than arriving in one block.
+  // Seed is stable (does not depend on any per-person value).
+  let seed = 0x5f3759df
+  function nextFloat() {
+    seed ^= seed << 13; seed ^= seed >>> 17; seed ^= seed << 5
+    seed = seed >>> 0
+    return seed / 0xffffffff
+  }
+  for (let i = flatSlots.length - 1; i > 0; i--) {
+    const j = Math.floor(nextFloat() * (i + 1));
+    [flatSlots[i], flatSlots[j]] = [flatSlots[j], flatSlots[i]]
+  }
+
+  // ── Step 3: assign slots to people using PERSON_COUNTS ──────────────────
+  // Cycle PERSON_COUNTS if there are fewer or more than 15 members.
+  const rows = []
+  let slotIdx = 0
+
+  for (let pi = 0; pi < teamMembers.length; pi++) {
+    const member = teamMembers[pi]
+    const count  = PERSON_COUNTS[pi % PERSON_COUNTS.length]
+    for (let k = 0; k < count && slotIdx < flatSlots.length; k++, slotIdx++) {
+      const { cat, q } = flatSlots[slotIdx]
+      rows.push({
+        org_id:         member.orgId,
+        user_id:        member.userId,
+        question:       q.text,
+        category:       cat.category,
+        category_label: cat.label,
+        source_topic:   q.platform ?? null,
+        asked_at:       randomPastDate(1, member.startOffset + 10),
+      })
+    }
   }
 
   return rows
-}
-
-/**
- * Guarantee every category in the set has at least one question across the
- * whole team.  For each category that received zero questions, append a single
- * row attributed to a seeded-chosen person from the team.
- *
- * @param {Array}  allRows      — all rows built so far for this team
- * @param {Array}  categories   — the team's full category set
- * @param {Array}  teamMembers  — array of { userId, orgId, email, startOffset }
- * @returns {Array} additional rows to append (may be empty)
- */
-function applyTeamCoverage(allRows, categories, teamMembers) {
-  // Nothing to attribute a question to — return early rather than crashing on
-  // an empty array (happens when everyone already existed and was skipped, or
-  // when a refresh run finds no members for a particular team).
-  if (teamMembers.length === 0) return []
-
-  const seen = new Set(allRows.map(r => r.category))
-  const extra = []
-
-  for (let ci = 0; ci < categories.length; ci++) {
-    const cat = categories[ci]
-    if (seen.has(cat.category)) continue
-
-    // Pick a person from the team using a seeded index so it is deterministic
-    const memberIdx  = Math.floor(seededFloat('cover' + ci + cat.category) * teamMembers.length)
-    const member     = teamMembers[memberIdx]
-    const qIdx       = Math.floor(seededFloat('coverq' + ci + member.email) * cat.questions.length)
-    const asked      = randomPastDate(1, member.startOffset + 10)
-
-    extra.push({
-      org_id:         member.orgId,
-      user_id:        member.userId,
-      question:       cat.questions[qIdx],
-      category:       cat.category,
-      category_label: cat.label,
-      asked_at:       asked,
-    })
-  }
-
-  return extra
 }
 
 // ─── Completion buckets ───────────────────────────────────────────────────────
@@ -1351,28 +1369,22 @@ if (values['refresh-questions']) {
     totalOldRows += deletedCount ?? 0
     totalPeople++
 
-    // Build this person's weighted rows (no per-person coverage pass)
-    const personRows = buildHeatmapRows(profile.id, profile.org_id, email, startOffset, categories)
-
     if (!teamBuckets.has(teamName)) {
       teamBuckets.set(teamName, { categories, members: [] })
     }
     teamBuckets.get(teamName).members.push({
-      userId: profile.id, orgId: profile.org_id, email, startOffset, rows: personRows,
+      userId: profile.id, orgId: profile.org_id, email, startOffset,
     })
 
     log(`  ✓ ${profile.full_name} (${email}) — deleted old rows [${teamName}]`)
   }
 
-  // ── Pass 2: coverage pass per team + bulk insert ──────────────────────────
+  // ── Pass 2: deterministic team build + bulk insert ────────────────────────
   const teamTally  = new Map()
   let totalNewRows = 0
 
   for (const [teamName, { categories, members }] of teamBuckets) {
-    const teamMembers = members.map(m => ({ userId: m.userId, orgId: m.orgId, email: m.email, startOffset: m.startOffset }))
-    const flatRows    = members.flatMap(m => m.rows)
-    const extra       = applyTeamCoverage(flatRows, categories, teamMembers)
-    const toInsert    = [...flatRows, ...extra]
+    const toInsert = buildTeamHeatmapRows(members, members[0]?.orgId ?? orgId, categories)
 
     if (toInsert.length > 0) {
       const { error: insErr } = await supabase.from('user_questions').insert(toInsert)
@@ -1381,7 +1393,7 @@ if (values['refresh-questions']) {
 
     teamTally.set(teamName, { people: members.length, newRows: toInsert.length })
     totalNewRows += toInsert.length
-    log(`  ✓ Team "${teamName}": ${toInsert.length} rows written (${extra.length} coverage top-ups)`)
+    log(`  ✓ Team "${teamName}": ${toInsert.length} rows written`)
   }
 
   console.log(`
@@ -1576,8 +1588,8 @@ async function createInterns(people, supervisor, roleId, templates, quizIds, que
   let assignmentsCreated = 0
   let answersCreated = 0
 
-  // Collect per-person heatmap rows here; coverage pass runs after the loop.
-  const allHeatmapRows = []   // { rows, member: { userId, orgId, email, startOffset } }
+  // Collect team members for the bulk heatmap build after the loop.
+  const heatmapMembers = []   // { userId, orgId, email, startOffset }
 
   for (let idx = 0; idx < people.length; idx++) {
     const person = people[idx]
@@ -1767,20 +1779,15 @@ async function createInterns(people, supervisor, roleId, templates, quizIds, que
       }
     }
 
-    // ── Collect question heatmap rows (inserted after coverage pass) ───────────
-    const startOffset = Math.abs(person.start)
-    const personRows  = buildHeatmapRows(userId, orgId, email, startOffset, categories)
-    allHeatmapRows.push({ rows: personRows, member: { userId, orgId, email, startOffset } })
+    // ── Collect this person for the team-level heatmap build ─────────────────
+    heatmapMembers.push({ userId, orgId, email, startOffset: Math.abs(person.start) })
 
     log(`  ✓ ${person.first} ${person.last} (${email}) — bucket: ${bucket}`)
     created++
   }
 
-  // ── Team-level coverage pass + bulk insert ─────────────────────────────────
-  const teamMembers   = allHeatmapRows.map(x => x.member)
-  const flatRows      = allHeatmapRows.flatMap(x => x.rows)
-  const coverageExtra = applyTeamCoverage(flatRows, categories, teamMembers)
-  const toInsert      = [...flatRows, ...coverageExtra]
+  // ── Build and insert all heatmap rows for the team at once ────────────────
+  const toInsert = buildTeamHeatmapRows(heatmapMembers, orgId, categories)
 
   if (toInsert.length > 0) {
     const { error: heatmapErr } = await supabase.from('user_questions').insert(toInsert)
