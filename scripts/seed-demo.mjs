@@ -13,6 +13,9 @@
  * Usage (teardown — deletes everything created by this script):
  *   npm run seed-demo -- --arda "arda@example.com" --arman "arman@example.com" --teardown
  *
+ * Usage (refresh questions only — replaces asked-question rows for existing fake starters):
+ *   npm run seed-demo -- --arda "arda@example.com" --arman "arman@example.com" --refresh-questions
+ *
  * Flags:
  *   --arda    <email>   Email of the supervisor who owns the Development team
  *   --arman   <email>   Email of the supervisor who owns the first Project Management team
@@ -20,6 +23,10 @@
  *                       Management team. When omitted only the two existing teams are seeded.
  *   --teardown          Delete all fake starters (matched by the FAKE_DOMAIN
  *                       constant below) and everything they own, then exit.
+ *   --refresh-questions For each already-seeded fake starter, delete their existing
+ *                       user_questions rows and write fresh ones drawn from their
+ *                       team's department-specific category set. Does not create
+ *                       any people, tasks, quiz assignments or quiz answers.
  *
  * What it does (seed):
  *  1. Looks up all provided supervisors; aborts if any is missing, wrong role,
@@ -74,10 +81,11 @@ const FAKE_DOMAIN = '@demo-seed.internal'
 
 const { values } = parseArgs({
   options: {
-    arda:      { type: 'string' },
-    arman:     { type: 'string' },
-    benjamin:  { type: 'string' },
-    teardown:  { type: 'boolean', default: false },
+    arda:                { type: 'string' },
+    arman:               { type: 'string' },
+    benjamin:            { type: 'string' },
+    teardown:            { type: 'boolean', default: false },
+    'refresh-questions': { type: 'boolean', default: false },
   },
 })
 
@@ -85,9 +93,10 @@ if (!values.arda || !values.arman) {
   console.error([
     'Error: --arda and --arman are required.',
     '',
-    'Seed (two teams):   npm run seed-demo -- --arda <email> --arman <email>',
-    'Seed (three teams): npm run seed-demo -- --arda <email> --arman <email> --benjamin <email>',
-    'Teardown:           npm run seed-demo -- --arda <email> --arman <email> --teardown',
+    'Seed (two teams):       npm run seed-demo -- --arda <email> --arman <email>',
+    'Seed (three teams):     npm run seed-demo -- --arda <email> --arman <email> --benjamin <email>',
+    'Teardown:               npm run seed-demo -- --arda <email> --arman <email> --teardown',
+    'Refresh questions only: npm run seed-demo -- --arda <email> --arman <email> --refresh-questions',
   ].join('\n'))
   process.exit(1)
 }
@@ -702,31 +711,445 @@ const PM_QUIZZES = [
   },
 ]
 
-// ─── Question heatmap categories ──────────────────────────────────────────────
+// ─── Question heatmap — department-specific category sets ─────────────────────
+//
+// Each entry carries:
+//   category  — short snake_case key stored in the DB
+//   label     — human-readable label shown in the heatmap tile
+//   weight    — relative likelihood of being chosen (higher = more questions)
+//               so the heatmap has an uneven, realistic shape
+//   questions — believable first-weeks questions in that person's voice
 
-const QUESTION_CATEGORIES = [
-  { category: 'laptop_setup',     label: 'Laptop setup'       },
-  { category: 'access_requests',  label: 'Access requests'    },
-  { category: 'time_off',         label: 'Time off'           },
-  { category: 'expenses',         label: 'Expenses'           },
-  { category: 'team_processes',   label: 'Team processes'     },
-  { category: 'tools_software',   label: 'Tools & software'   },
-  { category: 'hr_policies',      label: 'HR policies'        },
-  { category: 'it_support',       label: 'IT support'         },
+const DEV_CATEGORIES = [
+  {
+    category: 'repo_and_git',
+    label: 'Repo & Git',
+    weight: 5,
+    questions: [
+      'What is our branching strategy and how should I name my feature branches?',
+      'Do I need to squash commits before raising a pull request?',
+      "I can't push to main — is that expected or have I lost access?",
+      'Where can I find the commit message convention we follow?',
+      'How do I rebase my branch on top of the latest main without breaking things?',
+    ],
+  },
+  {
+    category: 'local_dev_env',
+    label: 'Local dev environment',
+    weight: 5,
+    questions: [
+      'What version of Node is the project expecting — should I use nvm or something else?',
+      "The Docker Compose stack starts but the app can't reach the database. What should I check first?",
+      'Where do I get the values for the .env.local file that the README says I need?',
+      "I'm on an M-series Mac and some native modules won't install. Is there a known workaround?",
+      'Is there a seed script I should run after a fresh database wipe to get test data back?',
+    ],
+  },
+  {
+    category: 'ci_cd',
+    label: 'CI / CD pipeline',
+    weight: 4,
+    questions: [
+      'My pull request is blocking on a lint check I can reproduce locally but not fix — who should I ask?',
+      'How long should a typical CI run take before I suspect something is stuck?',
+      'What triggers a production deploy and do I need to do anything to promote my change?',
+      'The pipeline failed on a flaky test. Am I expected to re-run it myself or wait for someone?',
+      'Where can I see the history of recent deploys and which commits they included?',
+    ],
+  },
+  {
+    category: 'code_review',
+    label: 'Code review',
+    weight: 4,
+    questions: [
+      'How many approvals does a PR need before I can merge it?',
+      'Is there a time-limit convention for how long reviewers have to respond?',
+      'What is the difference between a comment and a blocking review here — can I merge with unresolved comments?',
+      'Should I be self-reviewing my PRs before requesting review, and if so what does that mean in practice?',
+      "I got a review with a lot of nits. Am I supposed to address all of them before merging or just the blocking ones?",
+    ],
+  },
+  {
+    category: 'deployment',
+    label: 'Deployments',
+    weight: 3,
+    questions: [
+      'Do we have a deployment freeze period around releases and if so how will I know when one is active?',
+      'What is the rollback procedure if something I deploy causes an error spike?',
+      'How do I deploy only to staging without it going to production as well?',
+      'Who needs to be notified before a deployment that touches the payments service?',
+      'Is there a changelog I should update when I ship something user-facing?',
+    ],
+  },
+  {
+    category: 'monitoring_and_alerts',
+    label: 'Monitoring & alerts',
+    weight: 3,
+    questions: [
+      'How do I find the logs for the service I am working on without trawling through everything?',
+      'I triggered an alert in staging. Do I need to acknowledge it somewhere or will it clear on its own?',
+      'What dashboard should I be watching for error rates after a deploy?',
+      'How do I tell whether a spike in latency is related to my change or something external?',
+      'Where do I find the on-call schedule if I need to escalate something I see in the dashboards?',
+    ],
+  },
+  {
+    category: 'secrets_and_config',
+    label: 'Secrets & config',
+    weight: 3,
+    questions: [
+      'Where are environment variables managed for production — is it a secrets manager or something in the repo?',
+      'I need to add a new API key to the staging environment. Who can do that and how?',
+      'Are there any secrets in the repo I should know about, or is the rule that secrets never go in git?',
+      'How do I rotate a secret without causing downtime for the service that uses it?',
+      'What is the difference between the staging and production config and where is that documented?',
+    ],
+  },
+  {
+    category: 'testing',
+    label: 'Testing',
+    weight: 3,
+    questions: [
+      'Is there a minimum test coverage threshold I need to hit before a PR can be merged?',
+      'What is the distinction between unit and integration tests in this codebase and where do each live?',
+      'Are E2E tests run on every PR or only on release branches?',
+      'I am writing a test for a function that calls an external API. Should I mock it or use a test account?',
+      'Where is the shared test fixture data kept and how do I add to it without breaking existing tests?',
+    ],
+  },
+  {
+    category: 'incident_response',
+    label: 'Incident response',
+    weight: 2,
+    questions: [
+      'If I notice something broken in production outside of working hours, what do I do?',
+      'Where do I file a post-incident review and what is the expected turnaround?',
+      'What counts as a P1 versus a P2 incident here and who makes that call?',
+      'Am I expected to join the incident bridge as an observer even when it is not my service?',
+      'How do I mark an incident as resolved and communicate that to stakeholders?',
+    ],
+  },
+  {
+    category: 'architecture',
+    label: 'Architecture',
+    weight: 2,
+    questions: [
+      'Where is the system architecture documented and how up to date is it?',
+      'I need to add a new service — is there an ADR process I should follow first?',
+      'What is the convention for service-to-service communication — REST, gRPC, events?',
+      'Are there any services I should avoid calling directly from my new code for ownership reasons?',
+      'Who owns the data model for the accounts domain and how do I raise a schema change?',
+    ],
+  },
+  {
+    category: 'security',
+    label: 'Security',
+    weight: 2,
+    questions: [
+      'Is there a security review process I need to go through before shipping something that handles user data?',
+      'What is the policy on third-party packages — do I need approval before adding a new dependency?',
+      'I spotted what might be a vulnerability. Who do I report it to and how?',
+      'What is our approach to SQL injection protection — ORM only, or are parameterised queries allowed?',
+      'Is there a pentest report I should read to understand the known surface areas?',
+    ],
+  },
+  {
+    category: 'dependencies',
+    label: 'Dependency management',
+    weight: 2,
+    questions: [
+      'How do we decide when to upgrade a major dependency version and who owns that process?',
+      'I see a Dependabot PR sitting open for two weeks. Am I allowed to merge it or does someone specific own those?',
+      'What is our policy on pinning exact versions versus using ranges in package.json?',
+      'Is there a process for removing an unused dependency or do I just delete it and run the tests?',
+      'One of our transitive dependencies has a critical CVE. What is the expected response time?',
+    ],
+  },
+  {
+    category: 'on_call',
+    label: 'On-call',
+    weight: 1,
+    questions: [
+      'When will I be added to the on-call rota and what do I need to do to prepare?',
+      'What tooling do I need on my phone for on-call and is there a setup guide?',
+      'Is there shadowing before I take my first solo on-call shift?',
+      'What is the handover process between the outgoing and incoming on-call engineers?',
+      'How do I claim the on-call compensation — is it automatic or do I need to submit something?',
+    ],
+  },
+  {
+    category: 'documentation',
+    label: 'Documentation',
+    weight: 1,
+    questions: [
+      'Where should I put the runbook for the service I am building?',
+      'Is there a style guide for technical documentation or can I use any format?',
+      'How do I request a review of documentation I have written before it goes live?',
+      'Are diagrams kept in the repo alongside the code or in a separate place like Confluence?',
+      "My team's README is out of date. Am I expected to fix it as part of onboarding or raise a ticket?",
+    ],
+  },
 ]
 
-const SAMPLE_QUESTIONS = [
-  'How do I set up my laptop?',
-  'How do I request VPN access?',
-  'What is the holiday allowance?',
-  'How do I submit an expense claim?',
-  'Where is the team wiki?',
-  'How do I get access to the code repository?',
-  'What is the sick leave policy?',
-  'How do I log a support ticket?',
-  'What tools does the team use?',
-  'How do I book a meeting room?',
+// PM and PM2 share one set — same discipline, same questions.
+const PM_CATEGORIES = [
+  {
+    category: 'project_intake',
+    label: 'Project intake',
+    weight: 5,
+    questions: [
+      'How does a new project get formally initiated here — is there a brief template or a kick-off meeting?',
+      'Who signs off on the project scope before I am allowed to start planning?',
+      'Where do I find the intake criteria used to decide whether a request becomes a project?',
+      'I have been handed a project with no brief. What is the minimum I need before I start planning?',
+      'What is the process for declining a project request that does not meet the intake threshold?',
+    ],
+  },
+  {
+    category: 'stakeholder_management',
+    label: 'Stakeholder management',
+    weight: 5,
+    questions: [
+      'How do I find out who the key stakeholders are for a project that was already in flight when I joined?',
+      'What is the expectation for how often I should be touching base with senior stakeholders?',
+      'One of my stakeholders keeps changing their requirements. What is the escalation path?',
+      'Is there a stakeholder map template I should fill out at the start of every project?',
+      'How do I handle a stakeholder who is going around me directly to the delivery team?',
+    ],
+  },
+  {
+    category: 'risk_register',
+    label: 'Risk register',
+    weight: 4,
+    questions: [
+      'What tool do we use to maintain the risk register and where is the template?',
+      'How often is the risk register expected to be reviewed and updated?',
+      'What is the threshold for escalating a risk from amber to red?',
+      'Who else needs to sign off on risks rated red before I can continue with the plan?',
+      'Is there a standard set of risk categories I should be using or can I define my own?',
+    ],
+  },
+  {
+    category: 'raid_log',
+    label: 'RAID log',
+    weight: 4,
+    questions: [
+      'What is the difference between an assumption and a dependency in our RAID log format?',
+      'How long do resolved issues stay on the log before they are archived?',
+      'Who owns actions on the RAID log — me as PM or the person the action is assigned to?',
+      'Is there a threshold for issues that requires me to notify the programme board?',
+      'I inherited a RAID log that has not been maintained. What should I prioritise cleaning up first?',
+    ],
+  },
+  {
+    category: 'sprint_ceremonies',
+    label: 'Sprint ceremonies',
+    weight: 4,
+    questions: [
+      'What is the expected length of a sprint planning session for a team of eight people?',
+      'Who facilitates the retrospective — the PM or the team lead?',
+      'Is there a standard agenda for the daily stand-up or does each team run it differently?',
+      'How do I handle a sprint review where the demo environment is broken on the day?',
+      'What is the policy on cancelling a sprint if scope changes significantly mid-sprint?',
+    ],
+  },
+  {
+    category: 'delivery_metrics',
+    label: 'Delivery metrics',
+    weight: 3,
+    questions: [
+      'What metrics does the programme board expect to see on a regular status report?',
+      'How is velocity calculated here — story points, number of stories or something else?',
+      'Is there a dashboard I should be feeding data into or do I compile the metrics manually?',
+      'What is considered an acceptable cycle time for a user story from start to done?',
+      'Who reviews the metrics and how quickly do I need to act if something goes off track?',
+    ],
+  },
+  {
+    category: 'change_control',
+    label: 'Change control',
+    weight: 3,
+    questions: [
+      'What constitutes a change that needs to go through the formal change control process?',
+      'How long does a change request typically take to be approved and who can approve it?',
+      'Is there an emergency change process for fixes that need to go live immediately?',
+      'What happens if I implement a change without raising a change request first?',
+      'Where is the change log kept and am I responsible for updating it after a change is approved?',
+    ],
+  },
+  {
+    category: 'budget_tracking',
+    label: 'Budget tracking',
+    weight: 3,
+    questions: [
+      'Where do I access the project budget and what level of detail is tracked?',
+      'What is the process for raising a budget amendment if I am forecasting an overrun?',
+      'How often do I need to reconcile actual spend against the forecast?',
+      'Who approves ad-hoc purchases that are not in the original budget?',
+      'Is there a contingency reserve and what is the threshold for using it without further approval?',
+    ],
+  },
+  {
+    category: 'resource_planning',
+    label: 'Resource planning',
+    weight: 2,
+    questions: [
+      'How do I request a resource from another team and what is the lead time I should plan for?',
+      'Where is the resource capacity plan kept and how do I feed my project demand into it?',
+      'What do I do if a resource I was counting on is pulled from my project mid-delivery?',
+      'Is there a bench of available contractors I can draw on if the internal team is at capacity?',
+      'How do I handle a team member who is allocated to my project but spending time on other work?',
+    ],
+  },
+  {
+    category: 'status_reporting',
+    label: 'Status reporting',
+    weight: 2,
+    questions: [
+      'How often are status reports expected and who is the audience?',
+      'Is there a template for the RAG status report or do I format it myself?',
+      'What is the difference between the summary I send to the programme board and the one I send to the sponsor?',
+      'How far in advance do I need to submit a status report before a governance meeting?',
+      'What do I do if I have to report a red status for the first time — is there a separate notification I should send?',
+    ],
+  },
+  {
+    category: 'dependency_tracking',
+    label: 'Dependency tracking',
+    weight: 2,
+    questions: [
+      'How do I flag a cross-team dependency and get it acknowledged by the other PM?',
+      'What happens when a dependency I own slips — who do I tell and how quickly?',
+      'Is there a shared dependency register at programme level or does each project maintain its own?',
+      'How should I handle a dependency that has no owner yet?',
+      'I have a hard external dependency on a third-party delivery. Where do I record that risk?',
+    ],
+  },
+  {
+    category: 'retrospectives',
+    label: 'Retrospectives',
+    weight: 1,
+    questions: [
+      'Is there a standard retrospective format the organisation prefers or can I choose the technique?',
+      'Who should attend the retrospective — delivery team only or stakeholders as well?',
+      'How are retrospective actions tracked and who is accountable if they are not completed?',
+      'What is the expectation for sharing retrospective outcomes outside the team?',
+      'How soon after a project closes should the post-project retrospective be held?',
+    ],
+  },
+  {
+    category: 'governance',
+    label: 'Governance',
+    weight: 1,
+    questions: [
+      'What governance boards does my project need to report to and how often do they meet?',
+      'Is there a project classification system that determines the level of governance oversight?',
+      'What artefacts do I need to prepare for a gate review and how far in advance?',
+      'Who chairs the steering committee and how do I get time on the agenda?',
+      'Are there any mandatory assurance reviews built into the delivery lifecycle here?',
+    ],
+  },
+  {
+    category: 'escalation',
+    label: 'Escalation paths',
+    weight: 1,
+    questions: [
+      'What is the process for escalating a blocker that I cannot resolve at project level?',
+      'Who do I escalate to if two senior stakeholders give me conflicting direction?',
+      'Is there a formal escalation matrix or do I just judge it case by case?',
+      'How quickly is an escalation expected to be resolved once it reaches programme level?',
+      'Should I document every escalation somewhere even if it gets resolved informally?',
+    ],
+  },
 ]
+
+/**
+ * Build the user_questions rows for one person.
+ *
+ * Each person receives a small handful of questions (2–5) chosen entirely by
+ * the category weights — high-weight categories accumulate more questions
+ * across the team, creating the volume differences the heatmap exists to show.
+ *
+ * Coverage across the whole team is handled separately by
+ * applyTeamCoverage(), which appends any missing-category rows after all
+ * people have been processed.
+ *
+ * @param {string}  userId
+ * @param {string}  orgId
+ * @param {string}  email        — used as the seeding key
+ * @param {number}  startOffset  — Math.abs(person.start), used for date spread
+ * @param {Array}   categories   — the team's category set
+ * @returns {Array} rows ready to INSERT into user_questions
+ */
+function buildHeatmapRows(userId, orgId, email, startOffset, categories) {
+  const totalCount  = 2 + Math.floor(seededFloat(email + 'heatmap') * 4)  // 2–5
+  const totalWeight = categories.reduce((s, c) => s + c.weight, 0)
+  const rows = []
+
+  for (let qi = 0; qi < totalCount; qi++) {
+    const r = seededFloat(email + 'wt' + qi) * totalWeight
+    let acc = 0
+    let chosen = categories[categories.length - 1]
+    for (const cat of categories) {
+      acc += cat.weight
+      if (r < acc) { chosen = cat; break }
+    }
+    const qIdx  = Math.floor(seededFloat(email + 'wq' + qi) * chosen.questions.length)
+    const asked = randomPastDate(1, startOffset + 10)
+    rows.push({
+      org_id:         orgId,
+      user_id:        userId,
+      question:       chosen.questions[qIdx],
+      category:       chosen.category,
+      category_label: chosen.label,
+      asked_at:       asked,
+    })
+  }
+
+  return rows
+}
+
+/**
+ * Guarantee every category in the set has at least one question across the
+ * whole team.  For each category that received zero questions, append a single
+ * row attributed to a seeded-chosen person from the team.
+ *
+ * @param {Array}  allRows      — all rows built so far for this team
+ * @param {Array}  categories   — the team's full category set
+ * @param {Array}  teamMembers  — array of { userId, orgId, email, startOffset }
+ * @returns {Array} additional rows to append (may be empty)
+ */
+function applyTeamCoverage(allRows, categories, teamMembers) {
+  // Nothing to attribute a question to — return early rather than crashing on
+  // an empty array (happens when everyone already existed and was skipped, or
+  // when a refresh run finds no members for a particular team).
+  if (teamMembers.length === 0) return []
+
+  const seen = new Set(allRows.map(r => r.category))
+  const extra = []
+
+  for (let ci = 0; ci < categories.length; ci++) {
+    const cat = categories[ci]
+    if (seen.has(cat.category)) continue
+
+    // Pick a person from the team using a seeded index so it is deterministic
+    const memberIdx  = Math.floor(seededFloat('cover' + ci + cat.category) * teamMembers.length)
+    const member     = teamMembers[memberIdx]
+    const qIdx       = Math.floor(seededFloat('coverq' + ci + member.email) * cat.questions.length)
+    const asked      = randomPastDate(1, member.startOffset + 10)
+
+    extra.push({
+      org_id:         member.orgId,
+      user_id:        member.userId,
+      question:       cat.questions[qIdx],
+      category:       cat.category,
+      category_label: cat.label,
+      asked_at:       asked,
+    })
+  }
+
+  return extra
+}
 
 // ─── Completion buckets ───────────────────────────────────────────────────────
 //
@@ -843,6 +1266,140 @@ if (values.benjamin) {
 
 const supervisorCount = benjamin ? 3 : 2
 log(`✓ ${supervisorCount} supervisor(s) confirmed in org ${orgId}`)
+
+// ─── Refresh-questions mode ────────────────────────────────────────────────────
+//
+// Runs immediately after supervisors are resolved — before job roles, task
+// templates, quizzes, or any people-creation work.  Exits cleanly when done.
+
+if (values['refresh-questions']) {
+  section('Refresh-questions mode — updating asked-question rows for existing fake starters')
+
+  // Find every fake starter currently in the DB by their email domain
+  const { data: { users: allAuthUsers }, error: listErr2 } =
+    await supabase.auth.admin.listUsers({ perPage: 1000 })
+  if (listErr2) die('Failed to list auth users', listErr2)
+
+  const fakeAuthUsers = allAuthUsers.filter(u => u.email?.endsWith(FAKE_DOMAIN))
+
+  if (fakeAuthUsers.length === 0) {
+    console.log('\nNo seeded fake starters found — nothing to refresh.')
+    process.exit(0)
+  }
+
+  log(`Found ${fakeAuthUsers.length} fake starter(s) to refresh.`)
+
+  // Build a supervisor-id → category-set map from the supervisors passed in
+  const supervisorCategoryMap = new Map([
+    [arda.id,  { name: 'Development',        categories: DEV_CATEGORIES }],
+    [arman.id, { name: 'Project Management', categories: PM_CATEGORIES  }],
+  ])
+  if (benjamin) {
+    supervisorCategoryMap.set(benjamin.id, { name: 'Project Management (2)', categories: PM_CATEGORIES })
+  }
+
+  // Fetch the profile row for every fake starter so we know their supervisor
+  const fakeIds = fakeAuthUsers.map(u => u.id)
+  const { data: fakeProfiles, error: profErr } = await supabase
+    .from('profiles')
+    .select('id, full_name, supervisor_id, org_id')
+    .in('id', fakeIds)
+  if (profErr) die('Failed to fetch profiles for fake starters', profErr)
+
+  // ── Pass 1: delete old rows and collect per-person data ───────────────────
+  //
+  // Group by team first so we can apply the coverage pass per team after all
+  // people in that team have had their rows built.
+  //
+  // teamBuckets: teamName → { categories, members: [{ userId, orgId, email, startOffset, rows }] }
+  const teamBuckets = new Map()
+
+  let totalPeople  = 0
+  let totalOldRows = 0
+
+  // Fetch start_date for all fake starters in one query
+  const { data: profileDetails, error: pdErr } = await supabase
+    .from('profiles')
+    .select('id, start_date')
+    .in('id', fakeIds)
+  if (pdErr) die('Failed to fetch start_dates for fake starters', pdErr)
+  const startDateById = new Map((profileDetails ?? []).map(p => [p.id, p.start_date]))
+
+  for (const profile of (fakeProfiles ?? [])) {
+    const entry = supervisorCategoryMap.get(profile.supervisor_id)
+    if (!entry) {
+      log(`  ⚠ ${profile.full_name} — supervisor ${profile.supervisor_id} not in this run; skipping`)
+      continue
+    }
+
+    const { name: teamName, categories } = entry
+
+    const authUser   = fakeAuthUsers.find(u => u.id === profile.id)
+    const email      = authUser?.email ?? profile.id
+    const startDateMs = startDateById.get(profile.id)
+      ? new Date(startDateById.get(profile.id)).getTime()
+      : Date.now()
+    const startOffset = Math.max(1, Math.round((Date.now() - startDateMs) / 86_400_000))
+
+    // Delete old rows for this person
+    const { count: deletedCount, error: delErr } = await supabase
+      .from('user_questions')
+      .delete({ count: 'exact' })
+      .eq('user_id', profile.id)
+    if (delErr) die(`Failed to delete question rows for ${email}`, delErr)
+
+    totalOldRows += deletedCount ?? 0
+    totalPeople++
+
+    // Build this person's weighted rows (no per-person coverage pass)
+    const personRows = buildHeatmapRows(profile.id, profile.org_id, email, startOffset, categories)
+
+    if (!teamBuckets.has(teamName)) {
+      teamBuckets.set(teamName, { categories, members: [] })
+    }
+    teamBuckets.get(teamName).members.push({
+      userId: profile.id, orgId: profile.org_id, email, startOffset, rows: personRows,
+    })
+
+    log(`  ✓ ${profile.full_name} (${email}) — deleted old rows [${teamName}]`)
+  }
+
+  // ── Pass 2: coverage pass per team + bulk insert ──────────────────────────
+  const teamTally  = new Map()
+  let totalNewRows = 0
+
+  for (const [teamName, { categories, members }] of teamBuckets) {
+    const teamMembers = members.map(m => ({ userId: m.userId, orgId: m.orgId, email: m.email, startOffset: m.startOffset }))
+    const flatRows    = members.flatMap(m => m.rows)
+    const extra       = applyTeamCoverage(flatRows, categories, teamMembers)
+    const toInsert    = [...flatRows, ...extra]
+
+    if (toInsert.length > 0) {
+      const { error: insErr } = await supabase.from('user_questions').insert(toInsert)
+      if (insErr) die(`Failed to insert refreshed question rows for team "${teamName}"`, insErr)
+    }
+
+    teamTally.set(teamName, { people: members.length, newRows: toInsert.length })
+    totalNewRows += toInsert.length
+    log(`  ✓ Team "${teamName}": ${toInsert.length} rows written (${extra.length} coverage top-ups)`)
+  }
+
+  console.log(`
+─────────────────────────────────────────────────────
+Refresh complete.
+
+  People refreshed : ${totalPeople}
+  Old rows removed : ${totalOldRows}
+  New rows written : ${totalNewRows}
+
+  Breakdown by team:`)
+  for (const [name, t] of teamTally) {
+    console.log(`    ${name}: ${t.people} person(s), ${t.newRows} rows written`)
+  }
+  console.log(`─────────────────────────────────────────────────────
+`)
+  process.exit(0)
+}
 
 // ─── 2. Ensure job roles ──────────────────────────────────────────────────────
 
@@ -1013,11 +1570,14 @@ const pmQuestions  = await fetchQuizQuestions(pmQuizIds)
 
 section('Creating fake interns')
 
-async function createInterns(people, supervisor, roleId, templates, quizIds, questionMap, buckets, scoreProfiles, teamName) {
+async function createInterns(people, supervisor, roleId, templates, quizIds, questionMap, buckets, scoreProfiles, teamName, categories) {
   let created = 0
   let skipped = 0
   let assignmentsCreated = 0
   let answersCreated = 0
+
+  // Collect per-person heatmap rows here; coverage pass runs after the loop.
+  const allHeatmapRows = []   // { rows, member: { userId, orgId, email, startOffset } }
 
   for (let idx = 0; idx < people.length; idx++) {
     const person = people[idx]
@@ -1207,32 +1767,24 @@ async function createInterns(people, supervisor, roleId, templates, quizIds, que
       }
     }
 
-    // ── Write question heatmap rows ────────────────────────────────────────────
-    // Scatter 2–5 questions per person across different categories and dates
-    const questionCount = 2 + Math.floor(seededFloat(email + 'heatmap') * 4)
-    const heatmapRows = []
-
-    for (let qi = 0; qi < questionCount; qi++) {
-      const catIdx  = Math.floor(seededFloat(email + 'cat' + qi) * QUESTION_CATEGORIES.length)
-      const qIdx    = Math.floor(seededFloat(email + 'qs' + qi)  * SAMPLE_QUESTIONS.length)
-      const cat     = QUESTION_CATEGORIES[catIdx]
-      const askedAt = randomPastDate(1, Math.abs(person.start) + 10)
-
-      heatmapRows.push({
-        org_id:         orgId,
-        user_id:        userId,
-        question:       SAMPLE_QUESTIONS[qIdx],
-        category:       cat.category,
-        category_label: cat.label,
-        asked_at:       askedAt,
-      })
-    }
-
-    const { error: heatmapErr } = await supabase.from('user_questions').insert(heatmapRows)
-    if (heatmapErr) die(`Failed to insert heatmap rows for ${email}`, heatmapErr)
+    // ── Collect question heatmap rows (inserted after coverage pass) ───────────
+    const startOffset = Math.abs(person.start)
+    const personRows  = buildHeatmapRows(userId, orgId, email, startOffset, categories)
+    allHeatmapRows.push({ rows: personRows, member: { userId, orgId, email, startOffset } })
 
     log(`  ✓ ${person.first} ${person.last} (${email}) — bucket: ${bucket}`)
     created++
+  }
+
+  // ── Team-level coverage pass + bulk insert ─────────────────────────────────
+  const teamMembers   = allHeatmapRows.map(x => x.member)
+  const flatRows      = allHeatmapRows.flatMap(x => x.rows)
+  const coverageExtra = applyTeamCoverage(flatRows, categories, teamMembers)
+  const toInsert      = [...flatRows, ...coverageExtra]
+
+  if (toInsert.length > 0) {
+    const { error: heatmapErr } = await supabase.from('user_questions').insert(toInsert)
+    if (heatmapErr) die(`Failed to insert heatmap rows for team "${teamName}"`, heatmapErr)
   }
 
   return { created, skipped, assignmentsCreated, answersCreated }
@@ -1240,19 +1792,19 @@ async function createInterns(people, supervisor, roleId, templates, quizIds, que
 
 const devResult = await createInterns(
   DEV_PEOPLE, arda,  devRoleId, devTemplates, devQuizIds, devQuestions,
-  BUCKETS_DEV, SCORE_PROFILES_DEV, 'Development',
+  BUCKETS_DEV, SCORE_PROFILES_DEV, 'Development', DEV_CATEGORIES,
 )
 
 const pmResult = await createInterns(
   PM_PEOPLE, arman, pmRoleId, pmTemplates, pmQuizIds, pmQuestions,
-  BUCKETS_PM, SCORE_PROFILES_PM, 'Project Management',
+  BUCKETS_PM, SCORE_PROFILES_PM, 'Project Management', PM_CATEGORIES,
 )
 
 let pm2Result = { created: 0, skipped: 0, assignmentsCreated: 0, answersCreated: 0 }
 if (benjamin) {
   pm2Result = await createInterns(
     PM2_PEOPLE, benjamin, pmRoleId, pmTemplates, pmQuizIds, pmQuestions,
-    BUCKETS_PM2, SCORE_PROFILES_PM2, 'Project Management',
+    BUCKETS_PM2, SCORE_PROFILES_PM2, 'Project Management', PM_CATEGORIES,
   )
 }
 

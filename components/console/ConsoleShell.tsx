@@ -362,7 +362,7 @@ export default function ConsoleShell({
       )
     }
     if (mode === 'heatmap') {
-      return <QuestionHeatmap orgId={orgId} />
+      return <QuestionHeatmap orgId={orgId} supervisorId={userId} />
     }
     if (mode === 'supervisor') {
       return (

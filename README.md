@@ -216,7 +216,7 @@ The script:
 5. Creates fifteen fake interns per supervisor (email domain `@demo-seed.internal`). Accounts are email-confirmed immediately; no invitation emails are sent.
 6. Copies tasks from the role templates, marks a randomised proportion done with backdated timestamps.
 7. Assigns the role's quizzes to each starter and simulates a realistic spread of completion states: never started, partially answered, fully graded, and graded with supervisor feedback.
-8. Writes scattered `user_questions` rows so the supervisor heatmap is not blank.
+8. Writes `user_questions` rows so the supervisor heatmap is populated. Each person draws from a department-specific category set — Development starters ask software-engineering questions (repo & Git, CI/CD, local dev environment, code review, deployments, monitoring, secrets, testing, incident response, architecture, security, dependency management, on-call, documentation); Project Management starters ask delivery-management questions (project intake, stakeholder management, risk register, RAID log, sprint ceremonies, delivery metrics, change control, budget tracking, resource planning, status reporting, dependency tracking, retrospectives, governance, escalation paths). Every category in a team's set is guaranteed at least one question across the team; volume is distributed unevenly so the heatmap has a real shape.
 
 **Teardown** — to delete all fake starters (and everything they own) without touching the supervisors or shared quiz/role data:
 
@@ -228,6 +228,17 @@ npm run seed-demo -- \
 ```
 
 Teardown matches solely on the `@demo-seed.internal` email domain, so it removes every seeded starter regardless of which supervisor owns them — whether you seeded two teams or three, the same command cleans everything up.
+
+**Refreshing question rows only** — to replace asked-question rows for people who already exist without recreating anyone:
+
+```bash
+npm run seed-demo -- \
+  --arda  "arda@example.com" \
+  --arman "arman@example.com" \
+  --refresh-questions
+```
+
+`--refresh-questions` skips the entire person-creation path (no profiles, tasks, quiz assignments or quiz answers are touched). It finds every already-seeded fake starter by their `@demo-seed.internal` email domain, works out their team from the supervisor who owns them, deletes their existing `user_questions` rows, and writes fresh ones drawn from their team's department-specific category set. If no seeded starters are found the script says so and exits cleanly. A summary at the end reports how many people were refreshed, how many old rows were removed and how many new ones written, broken down by team. Pass `--benjamin` as well if a third supervisor was used when the data was originally seeded.
 
 Everything seeded under `@demo-seed.internal` is removed. Quizzes, job roles, and task templates are left intact.
 
