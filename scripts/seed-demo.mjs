@@ -136,6 +136,19 @@ function randomPastDate(minDaysAgo = 1, maxDaysAgo = 120) {
   return d.toISOString()
 }
 
+/**
+ * Like randomPastDate but also randomises the time-of-day within working hours
+ * (08:00–18:00) with a random minute, so each row gets a distinct timestamp.
+ */
+function randomPastWorkingTime(minDaysAgo = 1, maxDaysAgo = 120) {
+  const offset = minDaysAgo + Math.floor(Math.random() * (maxDaysAgo - minDaysAgo))
+  const hour   = 8 + Math.floor(Math.random() * 10)   // 08–17 inclusive
+  const minute = Math.floor(Math.random() * 60)
+  const d = new Date(Date.now() - offset * 86_400_000)
+  d.setHours(hour, minute, 0, 0)
+  return d.toISOString()
+}
+
 /** Seeded pseudorandom number in [0, 1) based on a string seed. */
 function seededFloat(seed) {
   let h = 0x811c9dc5
@@ -1161,7 +1174,7 @@ function buildTeamHeatmapRows(teamMembers, orgId, categories) {
         category:       cat.category,
         category_label: cat.label,
         source_topic:   q.platform ?? null,
-        asked_at:       randomPastDate(1, member.startOffset + 10),
+        asked_at:       randomPastWorkingTime(1, member.startOffset + 10),
       })
     }
   }

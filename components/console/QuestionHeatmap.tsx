@@ -19,13 +19,6 @@ const PAGE_SIZE     = 5
 const MAX_BARS      = 15   // cap before folding remainder into "Other"
 const MIN_COL_WIDTH = 160  // must match minmax() in the grid template
 
-/** Split a flat array into rows of `cols` each. */
-function toRows<T>(items: T[], cols: number): T[][] {
-  const rows: T[][] = []
-  for (let i = 0; i < items.length; i += cols) rows.push(items.slice(i, i + cols))
-  return rows
-}
-
 // Which dimension the chart is currently plotting
 type Dim = 'platforms' | 'categories'
 
@@ -202,11 +195,6 @@ function QuestionPanel({
           <span style={{ fontSize: 15, fontWeight: 600, color: 'var(--color-ink)' }}>
             {label}
           </span>
-          {subLabel && (
-          <span style={{ marginLeft: 8, fontSize: 11, color: 'var(--color-ink-muted)', letterSpacing: '0.02em' }}>
-            {subLabel}
-          </span>
-          )}
           <span style={{ marginLeft: 10, fontSize: 12, color: 'var(--color-ink-muted)' }}>
             {questions.length} question{questions.length === 1 ? '' : 's'}
           </span>
@@ -254,9 +242,6 @@ function QuestionPanel({
                 </p>
                 <p style={{ margin: '4px 0 0', fontSize: 11, color: 'var(--color-ink-muted)' }}>
                   {formatDate(q.asked_at)}
-                  {q.source_topic && (
-                    <> &middot; topic: <code style={{ fontSize: 11 }}>{q.source_topic}</code></>
-                  )}
                 </p>
               </div>
             </li>
@@ -461,48 +446,47 @@ function DrillPanel({ id, dim, barLabel, questions, onClose }: DrillPanelProps) 
               const isOpen       = selectedKey === item.key
               const { bg, text } = tileColor(item.count, maxDrillCount)
               return (
-                <button
-                  key={item.key}
-                  ref={el => {
-                    if (el) tileRefs.current.set(item.key, el)
-                    else    tileRefs.current.delete(item.key)
-                  }}
-                  role="listitem"
-                  type="button"
-                  aria-expanded={isOpen}
-                  aria-controls={isOpen ? qPanelId : undefined}
-                  onClick={() => {
-                    if (isOpen) {
-                      setSelectedKey(null)
-                    } else {
-                      setSelectedKey(item.key)
-                      setPage(0)
-                    }
-                  }}
-                  title={`${item.label}: ${item.count}`}
-                  style={{
-                    background:   bg,
-                    border:       isOpen ? '2px solid var(--color-accent)' : '2px solid transparent',
-                    borderRadius: 12,
-                    padding:      '16px 14px',
-                    textAlign:    'left',
-                    cursor:       'pointer',
-                    fontFamily:   'var(--font-sans)',
-                    transition:   'opacity 150ms',
-                  }}
-                  onMouseEnter={e => { (e.currentTarget as HTMLElement).style.opacity = '0.85' }}
-                  onMouseLeave={e => { (e.currentTarget as HTMLElement).style.opacity = '1' }}
-                >
-                  <div style={{ fontSize: 26, fontWeight: 700, color: text, lineHeight: 1, marginBottom: 6 }}>
-                    {item.count}
-                  </div>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: text, lineHeight: 1.3 }}>
-                    {item.label}
-                  </div>
-                  <div style={{ marginTop: 4, fontSize: 11, color: text, opacity: 0.75, letterSpacing: '0.02em' }}>
-                    {item.key}
-                  </div>
-                </button>
+                <div key={item.key} role="listitem">
+                  <button
+                    ref={el => {
+                      if (el) tileRefs.current.set(item.key, el)
+                      else    tileRefs.current.delete(item.key)
+                    }}
+                    type="button"
+                    aria-expanded={isOpen}
+                    aria-controls={isOpen ? qPanelId : undefined}
+                    onClick={() => {
+                      if (isOpen) {
+                        setSelectedKey(null)
+                      } else {
+                        setSelectedKey(item.key)
+                        setPage(0)
+                      }
+                    }}
+                    title={`${item.label}: ${item.count}`}
+                    style={{
+                      display:      'block',
+                      width:        '100%',
+                      background:   bg,
+                      border:       isOpen ? '2px solid var(--color-accent)' : '2px solid transparent',
+                      borderRadius: 12,
+                      padding:      '16px 14px',
+                      textAlign:    'left',
+                      cursor:       'pointer',
+                      fontFamily:   'var(--font-sans)',
+                      transition:   'opacity 150ms',
+                    }}
+                    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.opacity = '0.85' }}
+                    onMouseLeave={e => { (e.currentTarget as HTMLElement).style.opacity = '1' }}
+                  >
+                    <div style={{ fontSize: 26, fontWeight: 700, color: text, lineHeight: 1, marginBottom: 6 }}>
+                      {item.count}
+                    </div>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: text, lineHeight: 1.3 }}>
+                      {item.label}
+                    </div>
+                  </button>
+                </div>
               )
             })}
           </div>
@@ -513,7 +497,6 @@ function DrillPanel({ id, dim, barLabel, questions, onClose }: DrillPanelProps) 
               <QuestionPanel
                 id={qPanelId}
                 label={selectedItem.label}
-                subLabel={selectedItem.key}
                 questions={selectedItem.questions}
                 page={page}
                 visible={qVisible}
