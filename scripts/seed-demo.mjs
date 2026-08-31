@@ -1,28 +1,42 @@
 #!/usr/bin/env node
 /**
  * scripts/seed-demo.mjs
- * Seeds thirty fake new starters across two real supervisors so the demo
- * supervisor dashboards look alive.
+ * Seeds up to forty-five fake new starters across up to three real supervisors
+ * so the demo supervisor dashboards look alive.
  *
- * Usage (seed):
+ * Usage (seed — two teams):
  *   npm run seed-demo -- --arda "arda@example.com" --arman "arman@example.com"
+ *
+ * Usage (seed — three teams):
+ *   npm run seed-demo -- --arda "arda@example.com" --arman "arman@example.com" --benjamin "benjamin@example.com"
  *
  * Usage (teardown — deletes everything created by this script):
  *   npm run seed-demo -- --arda "arda@example.com" --arman "arman@example.com" --teardown
  *
+ * Usage (refresh questions only — replaces asked-question rows for existing fake starters):
+ *   npm run seed-demo -- --arda "arda@example.com" --arman "arman@example.com" --refresh-questions
+ *
  * Flags:
  *   --arda    <email>   Email of the supervisor who owns the Development team
- *   --arman   <email>   Email of the supervisor who owns the Project Management team
+ *   --arman   <email>   Email of the supervisor who owns the first Project Management team
+ *   --benjamin <email>   (Optional) Email of the supervisor who owns the second Project
+ *                       Management team. When omitted only the two existing teams are seeded.
  *   --teardown          Delete all fake starters (matched by the FAKE_DOMAIN
  *                       constant below) and everything they own, then exit.
+ *   --refresh-questions For each already-seeded fake starter, delete their existing
+ *                       user_questions rows and write fresh ones drawn from their
+ *                       team's department-specific category set. Does not create
+ *                       any people, tasks, quiz assignments or quiz answers.
  *
  * What it does (seed):
- *  1. Looks up both supervisors; aborts if either is missing, wrong role,
- *     or they are in different organisations.
+ *  1. Looks up all provided supervisors; aborts if any is missing, wrong role,
+ *     or not in the same organisation as the others.
  *  2. Ensures a "Development" and a "Project Management" job role exist for
  *     the org (idempotent).
  *  3. Ensures task templates exist for each role (idempotent).
- *  4. Ensures a quiz library exists for each role (idempotent).
+ *  4. Ensures a quiz library exists for each role (idempotent). The third team
+ *     reuses the Project Management role, its templates, and its quizzes — no
+ *     duplicates are created.
  *  5. Creates 15 fake interns per supervisor (skips any whose email already
  *     exists in auth.users — safe to re-run).
  *  6. For each new intern: copies tasks from their role's templates, marks
@@ -67,9 +81,11 @@ const FAKE_DOMAIN = '@demo-seed.internal'
 
 const { values } = parseArgs({
   options: {
-    arda:      { type: 'string' },
-    arman:     { type: 'string' },
-    teardown:  { type: 'boolean', default: false },
+    arda:                { type: 'string' },
+    arman:               { type: 'string' },
+    benjamin:            { type: 'string' },
+    teardown:            { type: 'boolean', default: false },
+    'refresh-questions': { type: 'boolean', default: false },
   },
 })
 
@@ -77,8 +93,10 @@ if (!values.arda || !values.arman) {
   console.error([
     'Error: --arda and --arman are required.',
     '',
-    'Seed:     npm run seed-demo -- --arda <email> --arman <email>',
-    'Teardown: npm run seed-demo -- --arda <email> --arman <email> --teardown',
+    'Seed (two teams):       npm run seed-demo -- --arda <email> --arman <email>',
+    'Seed (three teams):     npm run seed-demo -- --arda <email> --arman <email> --benjamin <email>',
+    'Teardown:               npm run seed-demo -- --arda <email> --arman <email> --teardown',
+    'Refresh questions only: npm run seed-demo -- --arda <email> --arman <email> --refresh-questions',
   ].join('\n'))
   process.exit(1)
 }
@@ -115,6 +133,19 @@ function section(msg) { console.log(`\n── ${msg}`) }
 function randomPastDate(minDaysAgo = 1, maxDaysAgo = 120) {
   const offset = minDaysAgo + Math.floor(Math.random() * (maxDaysAgo - minDaysAgo))
   const d = new Date(Date.now() - offset * 86_400_000)
+  return d.toISOString()
+}
+
+/**
+ * Like randomPastDate but also randomises the time-of-day within working hours
+ * (08:00–18:00) with a random minute, so each row gets a distinct timestamp.
+ */
+function randomPastWorkingTime(minDaysAgo = 1, maxDaysAgo = 120) {
+  const offset = minDaysAgo + Math.floor(Math.random() * (maxDaysAgo - minDaysAgo))
+  const hour   = 8 + Math.floor(Math.random() * 10)   // 08–17 inclusive
+  const minute = Math.floor(Math.random() * 60)
+  const d = new Date(Date.now() - offset * 86_400_000)
+  d.setHours(hour, minute, 0, 0)
   return d.toISOString()
 }
 
@@ -166,8 +197,34 @@ const PM_PEOPLE = [
   { first: 'Mia',       last: 'Johansson',  title: 'Project Manager',            start: -5  },
 ]
 
+const PM2_PEOPLE = [
+  { first: 'Darius',    last: 'Navarro',    title: 'Project Manager',            start: -88 },
+  { first: 'Ingrid',    last: 'Svensson',   title: 'Programme Coordinator',      start: -76 },
+  { first: 'Kwame',     last: 'Mensah',     title: 'Delivery Manager',           start: -64 },
+  { first: 'Valentina', last: 'Ricci',      title: 'Project Coordinator',        start: -56 },
+  { first: 'Marcus',    last: 'Okwu',       title: 'Project Manager',            start: -47 },
+  { first: 'Sofie',     last: 'Andersen',   title: 'Programme Manager',          start: -42 },
+  { first: 'Rafael',    last: 'Cardoso',    title: 'Delivery Manager',           start: -36 },
+  { first: 'Anneke',    last: 'Visser',     title: 'Project Coordinator',        start: -30 },
+  { first: 'Benson',    last: 'Kimani',     title: 'Project Manager',            start: -25 },
+  { first: 'Lena',      last: 'Hoffmann',   title: 'Programme Coordinator',      start: -21 },
+  { first: 'Tomás',     last: 'Varela',     title: 'Delivery Manager',           start: -16 },
+  { first: 'Chiara',    last: 'Gallo',      title: 'Project Manager',            start: -13 },
+  { first: 'Reuben',    last: 'Nakamura',   title: 'Programme Manager',          start: -9  },
+  { first: 'Fatou',     last: 'Camara',     title: 'Project Coordinator',        start: -6  },
+  { first: 'Aleksei',   last: 'Volkov',     title: 'Project Manager',            start: -3  },
+]
+
 function makeEmail(first, last) {
-  return `${first.toLowerCase()}.${last.toLowerCase()}${FAKE_DOMAIN}`
+  // NFD decompose so accents separate from their base letters, strip the
+  // combining marks (U+0300–U+036F), then drop anything that is not a plain
+  // lowercase letter or digit.  Names that contain only plain ASCII letters
+  // produce exactly the same address as before.
+  const norm = s => s.toLowerCase()
+                     .normalize('NFD')
+                     .replace(/[\u0300-\u036f]/g, '')
+                     .replace(/[^a-z0-9]/g, '')
+  return `${norm(first)}.${norm(last)}${FAKE_DOMAIN}`
 }
 
 function makeStartDate(offsetDays) {
@@ -667,31 +724,463 @@ const PM_QUIZZES = [
   },
 ]
 
-// ─── Question heatmap categories ──────────────────────────────────────────────
+// ─── Question heatmap — department-specific category sets ─────────────────────
+//
+// Each entry carries:
+//   category  — short snake_case key stored in the DB
+//   label     — human-readable label shown in the heatmap tile
+//   weight    — relative likelihood of being chosen (higher = more questions)
+//               so the heatmap has an uneven, realistic shape
+//   questions — array of { text, platform } objects.
+//               platform is a lowercase identifier (letters, digits, underscores)
+//               matching the product the question is about, or null when the
+//               question is about process rather than a specific tool.
 
-const QUESTION_CATEGORIES = [
-  { category: 'laptop_setup',     label: 'Laptop setup'       },
-  { category: 'access_requests',  label: 'Access requests'    },
-  { category: 'time_off',         label: 'Time off'           },
-  { category: 'expenses',         label: 'Expenses'           },
-  { category: 'team_processes',   label: 'Team processes'     },
-  { category: 'tools_software',   label: 'Tools & software'   },
-  { category: 'hr_policies',      label: 'HR policies'        },
-  { category: 'it_support',       label: 'IT support'         },
+const DEV_CATEGORIES = [
+  {
+    category: 'repo_and_git',
+    label: 'Repo & Git',
+    weight: 5,
+    questions: [
+      { text: 'What is our branching strategy and how should I name my feature branches?',       platform: 'github' },
+      { text: 'Do I need to squash commits before raising a pull request?',                      platform: 'github' },
+      { text: "I can't push to main — is that expected or have I lost access?",                  platform: 'github' },
+      { text: 'Where can I find the commit message convention we follow?',                        platform: 'github' },
+      { text: 'How do I rebase my branch on top of the latest main without breaking things?',    platform: 'github' },
+    ],
+  },
+  {
+    category: 'local_dev_env',
+    label: 'Local dev environment',
+    weight: 5,
+    questions: [
+      { text: 'What version of Node is the project expecting — should I use nvm or something else?',                     platform: 'node'       },
+      { text: "The Docker Compose stack starts but the app can't reach the database. What should I check first?",        platform: 'docker'     },
+      { text: 'Where in Confluence is the .env.local setup guide that lists every value I need to fill in?',             platform: 'confluence' },
+      { text: "I'm on an M-series Mac and native modules won't install — is there a Slack thread with the workaround?",  platform: 'slack'      },
+      { text: 'Is there a seed script in the GitHub repo I should run after a fresh database wipe?',                     platform: 'github'     },
+    ],
+  },
+  {
+    category: 'ci_cd',
+    label: 'CI / CD pipeline',
+    weight: 4,
+    questions: [
+      { text: 'My GitHub Actions check is failing on lint but passes locally — where do I look first?',                        platform: 'github' },
+      { text: 'How do I re-run just the failed jobs in a GitHub Actions workflow without triggering everything?',               platform: 'github' },
+      { text: 'What GitHub Actions event triggers a production deploy and do I need to approve the environment manually?',      platform: 'github' },
+      { text: 'The GitHub Actions pipeline failed on a flaky test — am I expected to re-run it myself or wait for someone?',   platform: 'github' },
+      { text: 'Where in GitHub can I see the history of recent deploys and which commits they included?',                       platform: 'github' },
+    ],
+  },
+  {
+    category: 'code_review',
+    label: 'Code review',
+    weight: 4,
+    questions: [
+      { text: 'How many approvals does a GitHub PR need before I can merge it?',                                                            platform: 'github' },
+      { text: 'Is there a time-limit convention for how long GitHub reviewers have to respond before I can reassign?',                      platform: 'github' },
+      { text: 'What is the difference between a comment and a blocking review in GitHub — can I merge with unresolved comments?',           platform: 'github' },
+      { text: 'Should I be self-reviewing my GitHub PR description before requesting review, and if so what does that mean in practice?',   platform: 'github' },
+      { text: 'I got a GitHub review with a lot of nits — am I supposed to address all of them before merging or just the blocking ones?',  platform: 'github' },
+    ],
+  },
+  {
+    category: 'deployment',
+    label: 'Deployments',
+    weight: 3,
+    questions: [
+      { text: 'Do we have a deployment freeze period around releases and how is it communicated — is there a Slack channel?',    platform: 'slack'  },
+      { text: 'If something I deploy causes an error spike, what is the rollback procedure and where do I announce it in Slack?', platform: 'slack'  },
+      { text: 'How do I target only the staging environment in GitHub Actions without the change going to production as well?',   platform: 'github' },
+      { text: 'Which Slack channel should I post in before deploying a change that touches the payments service?',               platform: 'slack'  },
+      { text: 'Is there a CHANGELOG file in the GitHub repo that I should update when I ship something user-facing?',            platform: 'github' },
+    ],
+  },
+  {
+    category: 'monitoring_and_alerts',
+    label: 'Monitoring & alerts',
+    weight: 3,
+    questions: [
+      { text: 'How do I find the logs for my service in Datadog without trawling through everything?',                 platform: 'datadog' },
+      { text: 'I triggered a Datadog alert in staging — do I need to acknowledge it or will it clear on its own?',    platform: 'datadog' },
+      { text: 'Which Datadog dashboard should I be watching for error rates after a deploy?',                          platform: 'datadog' },
+      { text: 'How do I tell in Datadog whether a latency spike is from my change or something external?',             platform: 'datadog' },
+      { text: 'Where do I find the PagerDuty on-call schedule if I need to escalate something I see in Datadog?',     platform: 'pagerduty' },
+    ],
+  },
+  {
+    category: 'secrets_and_config',
+    label: 'Secrets & config',
+    weight: 3,
+    questions: [
+      { text: 'Are production environment variables stored in GitHub Actions secrets or in a separate secrets manager?',              platform: 'github'     },
+      { text: 'I need to add a new API key to the GitHub Actions staging environment — who has permission to do that?',               platform: 'github'     },
+      { text: 'Are there any secrets in the repo I should know about, or is the rule that secrets never go in git?',                  platform: 'git'        },
+      { text: 'How do I rotate a GitHub Actions secret without causing downtime for the service that uses it?',                       platform: 'github'     },
+      { text: 'Where in Confluence is the difference between the staging and production config documented?',                          platform: 'confluence' },
+    ],
+  },
+  {
+    category: 'testing',
+    label: 'Testing',
+    weight: 3,
+    questions: [
+      { text: 'Is there a minimum Jest coverage threshold I need to hit before a GitHub PR can be merged?',                              platform: 'jest'   },
+      { text: 'Where in the GitHub repo do unit tests live versus integration tests, and what is the distinction between them?',         platform: 'github' },
+      { text: 'Are Cypress E2E tests run on every PR or only on release branches?',                                                      platform: 'cypress' },
+      { text: 'I am writing a Jest test for a function that calls an external API — should I mock it or use a test account?',            platform: 'jest'   },
+      { text: 'Where in the GitHub repo is the shared test fixture data kept and how do I add to it without breaking existing tests?',   platform: 'github' },
+    ],
+  },
+  {
+    category: 'incident_response',
+    label: 'Incident response',
+    weight: 2,
+    questions: [
+      { text: 'If I notice something broken in production outside of working hours, should I page the on-call engineer in PagerDuty?',  platform: 'pagerduty' },
+      { text: 'Where in Confluence do I file a post-incident review and what is the expected turnaround?',                              platform: 'confluence' },
+      { text: 'What counts as a P1 versus a P2 incident in PagerDuty and who makes that severity call?',                               platform: 'pagerduty'  },
+      { text: 'Am I expected to join the incident Slack channel as an observer even when it is not my service?',                        platform: 'slack'      },
+      { text: 'How do I resolve an incident in PagerDuty and post the all-clear to the incident Slack channel?',                        platform: 'pagerduty'  },
+    ],
+  },
+  {
+    category: 'architecture',
+    label: 'Architecture',
+    weight: 2,
+    questions: [
+      { text: 'Where in Confluence is the system architecture documented and how do I tell if it is up to date?',                    platform: 'confluence' },
+      { text: 'I need to add a new service — is there a Confluence ADR template I should fill out first?',                          platform: 'confluence' },
+      { text: 'Where in Confluence is the convention for service-to-service communication — REST, gRPC, or events — documented?',   platform: 'confluence' },
+      { text: 'Is there a CODEOWNERS file in GitHub that shows which services I should avoid calling directly?',                    platform: 'github'     },
+      { text: 'Who owns the accounts domain data model and how do I raise a schema change in GitHub?',                              platform: 'github'     },
+    ],
+  },
+  {
+    category: 'security',
+    label: 'Security',
+    weight: 2,
+    questions: [
+      { text: 'Is there a security review checklist in Confluence I need to complete before shipping something that handles user data?', platform: 'confluence' },
+      { text: 'Do I need to open a GitHub issue for approval before adding a third-party package as a new dependency?',                 platform: 'github'     },
+      { text: 'I spotted what might be a vulnerability — which Slack channel do I post to and who picks it up?',                       platform: 'slack'      },
+      { text: 'Where in Confluence is our approach to SQL injection protection documented — ORM only, or parameterised queries too?',   platform: 'confluence' },
+      { text: 'Where in Confluence can I find the latest pentest report to understand the known attack surface?',                       platform: 'confluence' },
+    ],
+  },
+  {
+    category: 'dependencies',
+    label: 'Dependency management',
+    weight: 2,
+    questions: [
+      { text: 'Where in GitHub is the process for deciding when to upgrade a major dependency version documented?',                    platform: 'github'     },
+      { text: 'I see a Dependabot PR sitting open for two weeks — am I allowed to merge it or does someone specific own those?',       platform: 'dependabot' },
+      { text: 'What is our policy on pinning exact versions versus using ranges in package.json?',                                      platform: 'npm'        },
+      { text: 'Is there a GitHub PR process for removing an unused dependency or do I just delete it and open a pull request?',        platform: 'github'     },
+      { text: 'A Dependabot alert flagged a critical CVE in one of our transitive dependencies — what is the expected response time?', platform: 'dependabot' },
+    ],
+  },
+  {
+    category: 'on_call',
+    label: 'On-call',
+    weight: 1,
+    questions: [
+      { text: 'When will I be added to the PagerDuty rota and what do I need to do to prepare?',                                  platform: 'pagerduty' },
+      { text: 'Do I need the PagerDuty app on my phone and is there a setup guide?',                                              platform: 'pagerduty' },
+      { text: 'Is there a shadowing rotation in PagerDuty before I take my first solo on-call shift?',                            platform: 'pagerduty' },
+      { text: 'Is there a Slack channel where the outgoing on-call engineer posts the handover notes?',                           platform: 'slack'     },
+      { text: 'How do I claim the on-call compensation — is it automatic or do I submit something via Slack?',                    platform: 'slack'     },
+    ],
+  },
+  {
+    category: 'documentation',
+    label: 'Documentation',
+    weight: 1,
+    questions: [
+      { text: 'Where in Confluence should I put the runbook for the service I am building?',                                        platform: 'confluence' },
+      { text: 'Is there a Confluence style guide for technical documentation or can I use any format I like?',                      platform: 'confluence' },
+      { text: 'Should I open a GitHub PR or post in Slack to request a review of documentation I have written?',                   platform: 'slack'      },
+      { text: 'Are diagrams kept in the GitHub repo alongside the code or in a separate Confluence space?',                        platform: 'confluence' },
+      { text: "My team's README in GitHub is out of date — am I expected to fix it as part of onboarding or raise a ticket?",      platform: 'github'     },
+    ],
+  },
 ]
 
-const SAMPLE_QUESTIONS = [
-  'How do I set up my laptop?',
-  'How do I request VPN access?',
-  'What is the holiday allowance?',
-  'How do I submit an expense claim?',
-  'Where is the team wiki?',
-  'How do I get access to the code repository?',
-  'What is the sick leave policy?',
-  'How do I log a support ticket?',
-  'What tools does the team use?',
-  'How do I book a meeting room?',
+// PM and PM2 share one set — same discipline, same questions.
+const PM_CATEGORIES = [
+  {
+    category: 'project_intake',
+    label: 'Project intake',
+    weight: 5,
+    questions: [
+      { text: 'How does a new project get formally initiated here — is there a Confluence template or a kick-off meeting?',      platform: 'confluence' },
+      { text: 'Who signs off on the project scope in Confluence before I am allowed to start planning?',                         platform: 'confluence' },
+      { text: 'How do I create the Jira project for a new initiative and which project template should I use?',                  platform: 'jira'       },
+      { text: 'I have been handed a project with no brief — is there a Confluence brief template I should fill in first?',       platform: 'confluence' },
+      { text: 'Where in Jira do I log a decision to decline a project request that does not meet the intake threshold?',         platform: 'jira'       },
+    ],
+  },
+  {
+    category: 'stakeholder_management',
+    label: 'Stakeholder management',
+    weight: 5,
+    questions: [
+      { text: 'Is there a Confluence page listing the key stakeholders for a project that was already in flight when I joined?',    platform: 'confluence' },
+      { text: 'Is there a Confluence page or Slack channel I should join to stay across stakeholder updates on my project?',        platform: 'confluence' },
+      { text: 'One of my stakeholders keeps changing their requirements — where in Jira do I log a change request to track this?',  platform: 'jira'       },
+      { text: 'Is there a stakeholder map template in Confluence I should fill out at the start of every project?',                 platform: 'confluence' },
+      { text: 'If a stakeholder goes around me directly to the delivery team, which Slack channel should I use to escalate that?',  platform: 'slack'      },
+    ],
+  },
+  {
+    category: 'risk_register',
+    label: 'Risk register',
+    weight: 4,
+    questions: [
+      { text: 'How do I set up a Jira issue type for risks and where is the team\'s current risk board?',                        platform: 'jira'       },
+      { text: 'How often is the Jira risk board expected to be reviewed and updated?',                                           platform: 'jira'       },
+      { text: 'Where in Confluence is the threshold for escalating a risk from amber to red documented?',                        platform: 'confluence' },
+      { text: 'Who else needs to approve a red-rated risk in Jira before I can continue with the plan?',                         platform: 'jira'       },
+      { text: 'Should I log a Jira ticket when a risk becomes an issue, or is the risk register entry enough?',                  platform: 'jira'       },
+    ],
+  },
+  {
+    category: 'raid_log',
+    label: 'RAID log',
+    weight: 4,
+    questions: [
+      { text: 'Do we maintain the RAID log in Confluence or as a Jira board, and where is the current one for my project?',      platform: 'jira'       },
+      { text: 'How long do resolved Jira issues stay on the RAID log before they are archived?',                                 platform: 'jira'       },
+      { text: 'Who owns actions on the RAID log — me as PM or the Jira assignee on each action ticket?',                         platform: 'jira'       },
+      { text: 'Where in Confluence is the threshold for issues that requires me to notify the programme board documented?',       platform: 'confluence' },
+      { text: 'I inherited a RAID log that has not been maintained — should I migrate it into Jira or keep it in Confluence?',   platform: 'jira'       },
+    ],
+  },
+  {
+    category: 'sprint_ceremonies',
+    label: 'Sprint ceremonies',
+    weight: 4,
+    questions: [
+      { text: 'Where do I set up the sprint in Jira and how do I move stories into it during planning?',                        platform: 'jira'  },
+      { text: 'Where in Confluence is the team agreement on who facilitates the retrospective documented?',                      platform: 'confluence' },
+      { text: 'Is the daily stand-up run from the Jira board or does each team do it differently?',                             platform: 'jira'  },
+      { text: 'If the demo environment is broken on sprint review day, which Slack channel should I post in to coordinate?',    platform: 'slack' },
+      { text: 'Where in Jira do I cancel a sprint if scope changes significantly mid-sprint?',                                  platform: 'jira'  },
+    ],
+  },
+  {
+    category: 'delivery_metrics',
+    label: 'Delivery metrics',
+    weight: 3,
+    questions: [
+      { text: 'Where in Confluence are the metrics the programme board expects to see on a regular status report documented?',   platform: 'confluence' },
+      { text: 'How is velocity calculated in Jira — story points, issue count, or something else?',                             platform: 'jira'       },
+      { text: 'Is there a Jira dashboard I should be maintaining or do I compile the metrics manually?',                        platform: 'jira'       },
+      { text: 'Where in Jira do I check the cycle time for a user story from start to done?',                                   platform: 'jira'       },
+      { text: 'Who reviews the Jira metrics and how quickly do I need to act if something goes off track?',                     platform: 'jira'       },
+    ],
+  },
+  {
+    category: 'change_control',
+    label: 'Change control',
+    weight: 3,
+    questions: [
+      { text: 'Where in Confluence is the definition of what constitutes a change requiring formal change control documented?',  platform: 'confluence' },
+      { text: 'How long does a Jira change request typically take to be approved and who has permission to approve it?',         platform: 'jira'       },
+      { text: 'Is there an emergency change issue type in Jira for fixes that need to go live immediately?',                     platform: 'jira'       },
+      { text: 'Where in Confluence is the change log and am I responsible for updating it after approval?',                      platform: 'confluence' },
+      { text: 'If I implement a change without a Jira change request, where in Confluence is the policy on that documented?',    platform: 'confluence' },
+    ],
+  },
+  {
+    category: 'budget_tracking',
+    label: 'Budget tracking',
+    weight: 3,
+    questions: [
+      { text: 'Where in Confluence is the project budget page and what level of detail is tracked there?',                         platform: 'confluence' },
+      { text: 'Is there a Confluence template for raising a budget amendment when I am forecasting an overrun?',                   platform: 'confluence' },
+      { text: 'Where in Confluence is the required reconciliation cadence for actual spend versus forecast documented?',           platform: 'confluence' },
+      { text: 'Which Slack channel should I use to request approval for an ad-hoc purchase that is not in the original budget?',   platform: 'slack'      },
+      { text: 'Where in Confluence is the contingency reserve policy and the threshold for using it without further approval?',    platform: 'confluence' },
+    ],
+  },
+  {
+    category: 'resource_planning',
+    label: 'Resource planning',
+    weight: 2,
+    questions: [
+      { text: 'How do I request a resource from another team — is there a Jira ticket type or a Slack channel for that?',        platform: 'jira'       },
+      { text: 'Where in Confluence is the resource capacity plan and how do I feed my project demand into it?',                  platform: 'confluence' },
+      { text: 'If a resource is pulled from my project mid-delivery, which Slack channel should I use to escalate it?',          platform: 'slack'      },
+      { text: 'Where in Confluence is the list of available contractors I can draw on if the internal team is at capacity?',     platform: 'confluence' },
+      { text: 'How do I log a Jira issue if a team member allocated to my project is spending time on other work?',              platform: 'jira'       },
+    ],
+  },
+  {
+    category: 'status_reporting',
+    label: 'Status reporting',
+    weight: 2,
+    questions: [
+      { text: 'Where in Confluence is the reporting cadence for status reports and the expected audience documented?',                platform: 'confluence' },
+      { text: 'Is there a Confluence template for the RAG status report or do I format it myself?',                                   platform: 'confluence' },
+      { text: 'Where in Confluence is the difference between the programme board summary and the sponsor summary explained?',         platform: 'confluence' },
+      { text: 'How far in advance do I need to submit a status report before a governance meeting — is it in the Confluence calendar?', platform: 'confluence' },
+      { text: 'When I need to report a red status, should I post in the project Slack channel before the formal report?',             platform: 'slack'      },
+    ],
+  },
+  {
+    category: 'dependency_tracking',
+    label: 'Dependency tracking',
+    weight: 2,
+    questions: [
+      { text: 'How do I flag a cross-team dependency in Jira and get it acknowledged by the other PM?',                          platform: 'jira'       },
+      { text: 'If a dependency I own slips, which Slack channel should I use to notify stakeholders and how quickly?',           platform: 'slack'      },
+      { text: 'Is there a shared dependency register in Confluence at programme level or does each project maintain its own?',   platform: 'confluence' },
+      { text: 'How do I raise a Jira issue to assign an owner to a dependency that currently has none?',                        platform: 'jira'       },
+      { text: 'I have a hard external dependency on a third-party delivery — where in Jira do I record that as a risk?',        platform: 'jira'       },
+    ],
+  },
+  {
+    category: 'retrospectives',
+    label: 'Retrospectives',
+    weight: 1,
+    questions: [
+      { text: 'Do teams use Miro for retrospectives here or is there another tool?',                                              platform: 'miro'       },
+      { text: 'Where in Confluence is the team agreement on who should attend the retrospective documented?',                     platform: 'confluence' },
+      { text: 'How are retrospective actions tracked — do they go into Jira or somewhere else?',                                  platform: 'jira'       },
+      { text: 'Where in Confluence should I post retrospective outcomes so the rest of the programme can see them?',              platform: 'confluence' },
+      { text: 'Where in Confluence is the project closure checklist that includes when to hold the post-project retrospective?',  platform: 'confluence' },
+    ],
+  },
+  {
+    category: 'governance',
+    label: 'Governance',
+    weight: 1,
+    questions: [
+      { text: 'Where in Confluence is the governance framework that lists which boards my project needs to report to?',          platform: 'confluence' },
+      { text: 'Where in Confluence is the project classification system that determines the level of governance oversight?',      platform: 'confluence' },
+      { text: 'Where in Confluence do I find the gate review template and what artefacts does it need?',                         platform: 'confluence' },
+      { text: 'Who chairs the steering committee and how do I request time on the agenda via Slack?',                            platform: 'slack'      },
+      { text: 'Where in Confluence is the delivery lifecycle document that lists mandatory assurance reviews?',                   platform: 'confluence' },
+    ],
+  },
+  {
+    category: 'escalation',
+    label: 'Escalation paths',
+    weight: 1,
+    questions: [
+      { text: 'Where in Jira do I log a blocker escalation that I cannot resolve at project level?',                            platform: 'jira'       },
+      { text: 'If two senior stakeholders give conflicting direction, which Slack channel should I use to escalate it?',        platform: 'slack'      },
+      { text: 'Where in Confluence is the formal escalation matrix documented?',                                                platform: 'confluence' },
+      { text: 'Where in Confluence is the SLA for how quickly an escalation must be resolved at programme level?',              platform: 'confluence' },
+      { text: 'Where in Confluence should I log every escalation, even ones that get resolved informally?',                     platform: 'confluence' },
+    ],
+  },
 ]
+
+/**
+ * Build ALL user_questions rows for a team deterministically.
+ *
+ * Algorithm:
+ *  1. Compute a team-wide question budget (TEAM_QUESTION_BUDGET).
+ *  2. Allocate that budget across categories in proportion to their weights
+ *     using a largest-remainder method so the parts sum exactly to the budget,
+ *     with a floor of at least 2 per category so none is rounded away.
+ *  3. Within each category, cycle through its questions in order so every
+ *     question gets used rather than one repeating.
+ *  4. Spread the resulting rows across the team members using PERSON_COUNTS,
+ *     a fixed sequence whose values sum to TEAM_QUESTION_BUDGET and whose
+ *     spread (6–10) looks natural.
+ *
+ * @param {Array}  teamMembers  — array of { userId, orgId, email, startOffset }
+ * @param {string} orgId
+ * @param {Array}  categories   — the team's category set
+ * @returns {Array} rows ready to INSERT into user_questions
+ */
+
+/** Total questions per 15-person team.  Chosen so weight-5 categories get
+ *  budget * (5/totalWeight) rows and weight-1 categories get budget * (1/totalWeight),
+ *  yielding exactly a 5:1 ratio when totalWeight = 40.  At 120 the per-category
+ *  exact shares are all whole numbers (no remainder pass needed), but the
+ *  largest-remainder logic is included for robustness. */
+const TEAM_QUESTION_BUDGET = 120
+
+/** Per-person question counts for 15 people.  Values sum to TEAM_QUESTION_BUDGET (120).
+ *  Range 6–10 makes per-person counts look natural. */
+const PERSON_COUNTS = [6, 7, 9, 8, 10, 7, 8, 9, 6, 10, 8, 7, 9, 6, 10]
+
+function buildTeamHeatmapRows(teamMembers, orgId, categories) {
+  if (teamMembers.length === 0) return []
+
+  // ── Step 1: allocate budget across categories ────────────────────────────
+  const totalWeight = categories.reduce((s, c) => s + c.weight, 0)
+  const FLOOR = 2
+
+  // Exact fractional shares
+  const exact = categories.map(c => (c.weight / totalWeight) * TEAM_QUESTION_BUDGET)
+
+  // Floor each share (minimum FLOOR)
+  const floors = exact.map(e => Math.max(FLOOR, Math.floor(e)))
+
+  // Distribute any remaining budget using largest-remainder method
+  let remaining = TEAM_QUESTION_BUDGET - floors.reduce((s, f) => s + f, 0)
+  const remainders = exact.map((e, i) => ({ i, r: e - Math.floor(e) }))
+  remainders.sort((a, b) => b.r - a.r)
+  for (let k = 0; k < remaining; k++) {
+    floors[remainders[k].i]++
+  }
+
+  // ── Step 2: build the flat ordered list of (category, questionIndex) pairs
+  //    cycling through each category's questions in order ─────────────────
+  const flatSlots = []   // each element: { cat, q }
+  for (let ci = 0; ci < categories.length; ci++) {
+    const cat   = categories[ci]
+    const count = floors[ci]
+    for (let k = 0; k < count; k++) {
+      const q = cat.questions[k % cat.questions.length]
+      flatSlots.push({ cat, q })
+    }
+  }
+
+  // Shuffle the flat list with a deterministic Fisher-Yates so questions from
+  // different categories are interleaved rather than arriving in one block.
+  // Seed is stable (does not depend on any per-person value).
+  let seed = 0x5f3759df
+  function nextFloat() {
+    seed ^= seed << 13; seed ^= seed >>> 17; seed ^= seed << 5
+    seed = seed >>> 0
+    return seed / 0xffffffff
+  }
+  for (let i = flatSlots.length - 1; i > 0; i--) {
+    const j = Math.floor(nextFloat() * (i + 1));
+    [flatSlots[i], flatSlots[j]] = [flatSlots[j], flatSlots[i]]
+  }
+
+  // ── Step 3: assign slots to people using PERSON_COUNTS ──────────────────
+  // Cycle PERSON_COUNTS if there are fewer or more than 15 members.
+  const rows = []
+  let slotIdx = 0
+
+  for (let pi = 0; pi < teamMembers.length; pi++) {
+    const member = teamMembers[pi]
+    const count  = PERSON_COUNTS[pi % PERSON_COUNTS.length]
+    for (let k = 0; k < count && slotIdx < flatSlots.length; k++, slotIdx++) {
+      const { cat, q } = flatSlots[slotIdx]
+      rows.push({
+        org_id:         member.orgId,
+        user_id:        member.userId,
+        question:       q.text,
+        category:       cat.category,
+        category_label: cat.label,
+        source_topic:   q.platform ?? null,
+        asked_at:       randomPastWorkingTime(1, member.startOffset + 10),
+      })
+    }
+  }
+
+  return rows
+}
 
 // ─── Completion buckets ───────────────────────────────────────────────────────
 //
@@ -710,10 +1199,17 @@ const BUCKETS_PM = [
   'never', 'finished', 'partial', 'feedback', 'finished',
 ]
 
+const BUCKETS_PM2 = [
+  'partial', 'feedback', 'finished', 'never', 'partial',
+  'finished', 'feedback', 'never', 'finished', 'partial',
+  'feedback', 'partial', 'never', 'finished', 'feedback',
+]
+
 // Score profiles: probability of choosing the correct answer per person index
 // (0 = always wrong, 1 = always right). Mix strong, middling, weak.
-const SCORE_PROFILES_DEV = [0.9, 0.95, 0.7, 0.85, 0.6, 0.5, 0.9, 0.75, 0.4, 0.8, 0.65, 0.95, 0.55, 0.7, 0.85]
-const SCORE_PROFILES_PM  = [0.8, 0.6,  0.9, 0.45, 0.7, 0.95, 0.55, 0.85, 0.65, 0.9, 0.4, 0.75, 0.8, 0.5, 0.95]
+const SCORE_PROFILES_DEV  = [0.9, 0.95, 0.7, 0.85, 0.6, 0.5, 0.9, 0.75, 0.4, 0.8, 0.65, 0.95, 0.55, 0.7, 0.85]
+const SCORE_PROFILES_PM   = [0.8, 0.6,  0.9, 0.45, 0.7, 0.95, 0.55, 0.85, 0.65, 0.9, 0.4, 0.75, 0.8, 0.5, 0.95]
+const SCORE_PROFILES_PM2  = [0.5, 0.85, 0.65, 0.95, 0.4, 0.75, 0.9, 0.55, 0.8, 0.45, 0.95, 0.6, 0.7, 0.85, 0.5]
 
 // ─── 0. Teardown ──────────────────────────────────────────────────────────────
 
@@ -790,7 +1286,145 @@ if (arda.orgId !== arman.orgId) {
 }
 
 const orgId = arda.orgId
-log(`✓ Both supervisors confirmed in org ${orgId}`)
+
+let benjamin = null
+if (values.benjamin) {
+  benjamin = await lookupSupervisor(values.benjamin, '--benjamin')
+  if (benjamin.orgId !== orgId) {
+    die(`--benjamin supervisor (${values.benjamin}) is in a different organisation (${benjamin.orgId} vs ${orgId}). All supervisors must share an org.`)
+  }
+}
+
+const supervisorCount = benjamin ? 3 : 2
+log(`✓ ${supervisorCount} supervisor(s) confirmed in org ${orgId}`)
+
+// ─── Refresh-questions mode ────────────────────────────────────────────────────
+//
+// Runs immediately after supervisors are resolved — before job roles, task
+// templates, quizzes, or any people-creation work.  Exits cleanly when done.
+
+if (values['refresh-questions']) {
+  section('Refresh-questions mode — updating asked-question rows for existing fake starters')
+
+  // Find every fake starter currently in the DB by their email domain
+  const { data: { users: allAuthUsers }, error: listErr2 } =
+    await supabase.auth.admin.listUsers({ perPage: 1000 })
+  if (listErr2) die('Failed to list auth users', listErr2)
+
+  const fakeAuthUsers = allAuthUsers.filter(u => u.email?.endsWith(FAKE_DOMAIN))
+
+  if (fakeAuthUsers.length === 0) {
+    console.log('\nNo seeded fake starters found — nothing to refresh.')
+    process.exit(0)
+  }
+
+  log(`Found ${fakeAuthUsers.length} fake starter(s) to refresh.`)
+
+  // Build a supervisor-id → category-set map from the supervisors passed in
+  const supervisorCategoryMap = new Map([
+    [arda.id,  { name: 'Development',        categories: DEV_CATEGORIES }],
+    [arman.id, { name: 'Project Management', categories: PM_CATEGORIES  }],
+  ])
+  if (benjamin) {
+    supervisorCategoryMap.set(benjamin.id, { name: 'Project Management (2)', categories: PM_CATEGORIES })
+  }
+
+  // Fetch the profile row for every fake starter so we know their supervisor
+  const fakeIds = fakeAuthUsers.map(u => u.id)
+  const { data: fakeProfiles, error: profErr } = await supabase
+    .from('profiles')
+    .select('id, full_name, supervisor_id, org_id')
+    .in('id', fakeIds)
+  if (profErr) die('Failed to fetch profiles for fake starters', profErr)
+
+  // ── Pass 1: delete old rows and collect per-person data ───────────────────
+  //
+  // Group by team first so we can apply the coverage pass per team after all
+  // people in that team have had their rows built.
+  //
+  // teamBuckets: teamName → { categories, members: [{ userId, orgId, email, startOffset, rows }] }
+  const teamBuckets = new Map()
+
+  let totalPeople  = 0
+  let totalOldRows = 0
+
+  // Fetch start_date for all fake starters in one query
+  const { data: profileDetails, error: pdErr } = await supabase
+    .from('profiles')
+    .select('id, start_date')
+    .in('id', fakeIds)
+  if (pdErr) die('Failed to fetch start_dates for fake starters', pdErr)
+  const startDateById = new Map((profileDetails ?? []).map(p => [p.id, p.start_date]))
+
+  for (const profile of (fakeProfiles ?? [])) {
+    const entry = supervisorCategoryMap.get(profile.supervisor_id)
+    if (!entry) {
+      log(`  ⚠ ${profile.full_name} — supervisor ${profile.supervisor_id} not in this run; skipping`)
+      continue
+    }
+
+    const { name: teamName, categories } = entry
+
+    const authUser   = fakeAuthUsers.find(u => u.id === profile.id)
+    const email      = authUser?.email ?? profile.id
+    const startDateMs = startDateById.get(profile.id)
+      ? new Date(startDateById.get(profile.id)).getTime()
+      : Date.now()
+    const startOffset = Math.max(1, Math.round((Date.now() - startDateMs) / 86_400_000))
+
+    // Delete old rows for this person
+    const { count: deletedCount, error: delErr } = await supabase
+      .from('user_questions')
+      .delete({ count: 'exact' })
+      .eq('user_id', profile.id)
+    if (delErr) die(`Failed to delete question rows for ${email}`, delErr)
+
+    totalOldRows += deletedCount ?? 0
+    totalPeople++
+
+    if (!teamBuckets.has(teamName)) {
+      teamBuckets.set(teamName, { categories, members: [] })
+    }
+    teamBuckets.get(teamName).members.push({
+      userId: profile.id, orgId: profile.org_id, email, startOffset,
+    })
+
+    log(`  ✓ ${profile.full_name} (${email}) — deleted old rows [${teamName}]`)
+  }
+
+  // ── Pass 2: deterministic team build + bulk insert ────────────────────────
+  const teamTally  = new Map()
+  let totalNewRows = 0
+
+  for (const [teamName, { categories, members }] of teamBuckets) {
+    const toInsert = buildTeamHeatmapRows(members, members[0]?.orgId ?? orgId, categories)
+
+    if (toInsert.length > 0) {
+      const { error: insErr } = await supabase.from('user_questions').insert(toInsert)
+      if (insErr) die(`Failed to insert refreshed question rows for team "${teamName}"`, insErr)
+    }
+
+    teamTally.set(teamName, { people: members.length, newRows: toInsert.length })
+    totalNewRows += toInsert.length
+    log(`  ✓ Team "${teamName}": ${toInsert.length} rows written`)
+  }
+
+  console.log(`
+─────────────────────────────────────────────────────
+Refresh complete.
+
+  People refreshed : ${totalPeople}
+  Old rows removed : ${totalOldRows}
+  New rows written : ${totalNewRows}
+
+  Breakdown by team:`)
+  for (const [name, t] of teamTally) {
+    console.log(`    ${name}: ${t.people} person(s), ${t.newRows} rows written`)
+  }
+  console.log(`─────────────────────────────────────────────────────
+`)
+  process.exit(0)
+}
 
 // ─── 2. Ensure job roles ──────────────────────────────────────────────────────
 
@@ -936,6 +1570,7 @@ async function upsertQuizzes(roleId, roleName, supervisorId, quizDefs) {
 
 const devQuizIds = await upsertQuizzes(devRoleId, 'Development',        arda.id,  DEV_QUIZZES)
 const pmQuizIds  = await upsertQuizzes(pmRoleId,  'Project Management', arman.id, PM_QUIZZES)
+// pmQuizIds is reused for the third team — no new quizzes are created
 
 // Fetch all questions for each quiz bank so we can write answers later
 async function fetchQuizQuestions(quizIds) {
@@ -954,16 +1589,20 @@ async function fetchQuizQuestions(quizIds) {
 
 const devQuestions = await fetchQuizQuestions(devQuizIds)
 const pmQuestions  = await fetchQuizQuestions(pmQuizIds)
+// The third team shares the same PM questions
 
 // ─── 5. Create fake interns ────────────────────────────────────────────────────
 
 section('Creating fake interns')
 
-async function createInterns(people, supervisor, roleId, templates, quizIds, questionMap, buckets, scoreProfiles, teamName) {
+async function createInterns(people, supervisor, roleId, templates, quizIds, questionMap, buckets, scoreProfiles, teamName, categories) {
   let created = 0
   let skipped = 0
   let assignmentsCreated = 0
   let answersCreated = 0
+
+  // Collect team members for the bulk heatmap build after the loop.
+  const heatmapMembers = []   // { userId, orgId, email, startOffset }
 
   for (let idx = 0; idx < people.length; idx++) {
     const person = people[idx]
@@ -1153,32 +1792,19 @@ async function createInterns(people, supervisor, roleId, templates, quizIds, que
       }
     }
 
-    // ── Write question heatmap rows ────────────────────────────────────────────
-    // Scatter 2–5 questions per person across different categories and dates
-    const questionCount = 2 + Math.floor(seededFloat(email + 'heatmap') * 4)
-    const heatmapRows = []
-
-    for (let qi = 0; qi < questionCount; qi++) {
-      const catIdx  = Math.floor(seededFloat(email + 'cat' + qi) * QUESTION_CATEGORIES.length)
-      const qIdx    = Math.floor(seededFloat(email + 'qs' + qi)  * SAMPLE_QUESTIONS.length)
-      const cat     = QUESTION_CATEGORIES[catIdx]
-      const askedAt = randomPastDate(1, Math.abs(person.start) + 10)
-
-      heatmapRows.push({
-        org_id:         orgId,
-        user_id:        userId,
-        question:       SAMPLE_QUESTIONS[qIdx],
-        category:       cat.category,
-        category_label: cat.label,
-        asked_at:       askedAt,
-      })
-    }
-
-    const { error: heatmapErr } = await supabase.from('user_questions').insert(heatmapRows)
-    if (heatmapErr) die(`Failed to insert heatmap rows for ${email}`, heatmapErr)
+    // ── Collect this person for the team-level heatmap build ─────────────────
+    heatmapMembers.push({ userId, orgId, email, startOffset: Math.abs(person.start) })
 
     log(`  ✓ ${person.first} ${person.last} (${email}) — bucket: ${bucket}`)
     created++
+  }
+
+  // ── Build and insert all heatmap rows for the team at once ────────────────
+  const toInsert = buildTeamHeatmapRows(heatmapMembers, orgId, categories)
+
+  if (toInsert.length > 0) {
+    const { error: heatmapErr } = await supabase.from('user_questions').insert(toInsert)
+    if (heatmapErr) die(`Failed to insert heatmap rows for team "${teamName}"`, heatmapErr)
   }
 
   return { created, skipped, assignmentsCreated, answersCreated }
@@ -1186,37 +1812,49 @@ async function createInterns(people, supervisor, roleId, templates, quizIds, que
 
 const devResult = await createInterns(
   DEV_PEOPLE, arda,  devRoleId, devTemplates, devQuizIds, devQuestions,
-  BUCKETS_DEV, SCORE_PROFILES_DEV, 'Development',
+  BUCKETS_DEV, SCORE_PROFILES_DEV, 'Development', DEV_CATEGORIES,
 )
 
 const pmResult = await createInterns(
   PM_PEOPLE, arman, pmRoleId, pmTemplates, pmQuizIds, pmQuestions,
-  BUCKETS_PM, SCORE_PROFILES_PM, 'Project Management',
+  BUCKETS_PM, SCORE_PROFILES_PM, 'Project Management', PM_CATEGORIES,
 )
+
+let pm2Result = { created: 0, skipped: 0, assignmentsCreated: 0, answersCreated: 0 }
+if (benjamin) {
+  pm2Result = await createInterns(
+    PM2_PEOPLE, benjamin, pmRoleId, pmTemplates, pmQuizIds, pmQuestions,
+    BUCKETS_PM2, SCORE_PROFILES_PM2, 'Project Management', PM_CATEGORIES,
+  )
+}
 
 // ─── Summary ──────────────────────────────────────────────────────────────────
 
-const totalCreated     = devResult.created     + pmResult.created
-const totalSkipped     = devResult.skipped     + pmResult.skipped
-const totalAssignments = devResult.assignmentsCreated + pmResult.assignmentsCreated
-const totalAnswers     = devResult.answersCreated     + pmResult.answersCreated
+const totalCreated     = devResult.created     + pmResult.created     + pm2Result.created
+const totalSkipped     = devResult.skipped     + pmResult.skipped     + pm2Result.skipped
+const totalAssignments = devResult.assignmentsCreated + pmResult.assignmentsCreated + pm2Result.assignmentsCreated
+const totalAnswers     = devResult.answersCreated     + pmResult.answersCreated     + pm2Result.answersCreated
+
+const pm2Line = benjamin
+  ? ` / ${pm2Result.created} PM-2`
+  : ''
 
 console.log(`
 ─────────────────────────────────────────────────────
 Seed complete.
 
-  New starters created : ${totalCreated}  (${devResult.created} dev / ${pmResult.created} PM)
+  New starters created : ${totalCreated}  (${devResult.created} dev / ${pmResult.created} PM${pm2Line})
   Already existed      : ${totalSkipped}  (skipped)
   Quiz assignments     : ${totalAssignments}
   Quiz answers written : ${totalAnswers}
 
   Dev quizzes   : ${devQuizIds.length}  (linked to "Development" role)
-  PM quizzes    : ${pmQuizIds.length}  (linked to "Project Management" role)
+  PM quizzes    : ${pmQuizIds.length}  (linked to "Project Management" role, shared by all PM teams)
 
   Fake domain   : ${FAKE_DOMAIN}
   Org ID        : ${orgId}
 
 To tear down all fake starters:
-  npm run seed-demo -- --arda "${values.arda}" --arman "${values.arman}" --teardown
+  npm run seed-demo -- --arda "${values.arda}" --arman "${values.arman}"${values.benjamin ? ` --benjamin "${values.benjamin}"` : ''} --teardown
 ─────────────────────────────────────────────────────
 `)
